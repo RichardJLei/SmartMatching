@@ -11,7 +11,7 @@ class PDFProcessor:
     """Utility class for processing PDF files and extracting text content."""
     
     @staticmethod
-    async def extract_text_from_pdf(file_id: UUID, file_path: str, file_name: str) -> Dict[str, Union[str, int]]:
+    async def extract_text_from_pdf(file_id: UUID, file_path: str, file_name: str) -> Dict[str, Union[str, int, bool]]:
         """Extract text content from a PDF file and update database."""
         # Construct full file path by joining path and filename
         full_file_path = os.path.join(file_path, file_name)
@@ -43,12 +43,24 @@ class PDFProcessor:
                     await db.commit()
             
             return {
-                "file_id": str(file_id),
-                "file_name": file_name,
-                "text_content": text_content,
-                "page_count": len(reader.pages),
-                "file_size": os.path.getsize(full_file_path),
-                "status": "extracted"
+                "data": {
+                    "id": str(file_id),
+                    "status": "completed",
+                    "success": True,
+                    "message": f"Successfully extracted text from {file_name}",
+                    "metadata": {
+                        "page_count": len(reader.pages),
+                        "file_size": os.path.getsize(full_file_path)
+                    }
+                }
             }
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}") 
+            return {
+                "data": {
+                    "id": str(file_id),
+                    "status": "failed",
+                    "success": False,
+                    "message": f"Error processing PDF: {str(e)}",
+                    "error": str(e)
+                }
+            } 
