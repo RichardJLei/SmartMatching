@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from database.models import ConfirmationFile
 from database.database import get_db
 from uuid import UUID
-from sqlalchemy import text, select
+from sqlalchemy import select
 
 class PDFProcessor:
     """Utility class for processing PDF files and extracting text content."""
@@ -39,7 +39,7 @@ class PDFProcessor:
                 file_record = result.scalar_one_or_none()
                 if file_record:
                     file_record.extracted_text = text_content
-                    file_record.processing_status = 'processed'
+                    file_record.processing_status = 'extracted'
                     await db.commit()
             
             return {
@@ -47,7 +47,8 @@ class PDFProcessor:
                 "file_name": file_name,
                 "text_content": text_content,
                 "page_count": len(reader.pages),
-                "file_size": os.path.getsize(full_file_path)
+                "file_size": os.path.getsize(full_file_path),
+                "status": "extracted"
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error processing PDF: {str(e)}") 
