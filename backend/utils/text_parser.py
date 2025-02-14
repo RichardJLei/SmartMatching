@@ -1,5 +1,6 @@
 from typing import Dict, Any
-from datetime import datetime
+from services.model_service import ModelFactory
+from fastapi import HTTPException
 
 class TextParser:
     """Handles text parsing operations using different models"""
@@ -15,14 +16,26 @@ class TextParser:
             
         Returns:
             Dict[str, Any]: Parsed result including original text
+            
+        Raises:
+            HTTPException: If parsing fails
         """
-        # TODO: Implement actual model integration
-        return {
-            'original_text': text,  # Include the original extracted text
-            'parsed_result': {
-                'title': 'Sample Document',
-                'sections': [
-                    {'heading': 'Introduction', 'content': 'Sample content...'}
-                ]
+        try:
+            # Get appropriate model service
+            model_service = ModelFactory.get_model_service(model_id)
+            
+            # Parse text using the model
+            parsed_result = await model_service.parse_text(text)
+            
+            return {
+                'original_text': text,
+                'parsed_result': parsed_result
             }
-        } 
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Text parsing failed: {str(e)}"
+            ) 

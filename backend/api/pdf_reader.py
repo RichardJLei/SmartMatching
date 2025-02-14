@@ -21,15 +21,27 @@ class LocationType(str, Enum):
     LOCAL = "local"
     CLOUD = "cloud"
 
+class ModelType(str, Enum):
+    """Enum for supported parsing models"""
+    DEEPSEEK_R1 = "deepseek_r1"
+    NVIDIA_DEEPSEEK_R1 = "nvidia_deepseek_r1"
+    # Add more models as needed
+
 class PDFReadRequest(BaseModel):
     """Request model for PDF reading endpoints"""
     file_id: UUID4
     location: LocationType
 
 class ParseTextRequest(BaseModel):
-    """Request model for text parsing endpoint"""
+    """
+    Request model for text parsing endpoint
+    
+    Attributes:
+        file_id: Unique identifier of the file to parse
+        model_id: Model to use for parsing, defaults to DEEPSEEK_R1
+    """
     file_id: UUID4
-    model_id: str = 'deepseek_r1'
+    model_id: ModelType = ModelType.DEEPSEEK_R1
 
 @router.post("/extract-text")
 async def extract_text(request: PDFReadRequest):
@@ -74,7 +86,18 @@ async def extract_text(request: PDFReadRequest):
 
 @router.post("/parse-text")
 async def parse_text(request: ParseTextRequest):
-    """Parse extracted text using specified model"""
+    """
+    Parse extracted text using specified model.
+    
+    Args:
+        request (ParseTextRequest): Contains file_id and model selection
+        
+    Returns:
+        dict: Contains parsing results and status
+        
+    Raises:
+        HTTPException: If file not found or processing fails
+    """
     try:
         file_data = await FileService.get_extracted_file(request.file_id)
         
@@ -85,22 +108,23 @@ async def parse_text(request: ParseTextRequest):
         if not file_data.extracted_text:
             raise HTTPException(status_code=404, detail="No extracted text found")
 
-        # Get both parsed result and original text
+        # Get both parsed result and original text using specified model
         result = await TextParser.parse_with_model(
             file_data.extracted_text,
-            request.model_id
+            request.model_id.value  # Use the enum value
         )
 
         # Update database with parsed result only
         await FileService.update_parsed_file(
             request.file_id,
-            result['parsed_result'],  # Store only the parsed portion
-            request.model_id
+            result['parsed_result'],
+            request.model_id.value
         )
 
         return {
             'success': True,
-            'data': result  # Return both original text and parsed result
+            'model_used': request.model_id.value,
+            'data': result
         }
 
     except HTTPException as he:
