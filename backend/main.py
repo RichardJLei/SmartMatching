@@ -1,5 +1,7 @@
 from fastapi import FastAPI
-from api import pdf_reader
+from api.pdf_reader import router as pdf_router
 
 app = FastAPI()
-app.include_router(pdf_reader.router) 
+
+# Include the router
+app.include_router(pdf_router) 
