@@ -74,12 +74,6 @@ class FileService:
         """
         async with get_db() as db:
             try:
-                # Update file status
-                await db.execute(
-                    update(ConfirmationFile)
-                    .where(ConfirmationFile.file_id == file_id)
-                    .values(processing_status='parsed')
-                )
                 
                 # Create new parsing result
                 new_parsing_result = ParsingResult(
