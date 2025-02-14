@@ -1,0 +1,25 @@
+{
+    "model_info": {
+      "model": "deepseek-chat",
+      "provider": "openai"
+    },
+    "parsed_content": {
+      "MsgSender": "ReadyKorea Co Ltd",
+      "TradeDate": "2024-11-22",
+      "ValueDate": "2024-11-26",
+      "MsgReceiver": "HK and Shanghai Banking Corp Ltd",
+      "Counterparty": "HSBC_KR_001",
+      "ForwardPoints": null,
+      "SettlementDate": "2024-11-26",
+      "SettlementRate": 1394.2,
+      "TradingCurrency": "KRW",
+      "CreationDateTime": "2025-02-10",
+      "TradingCCYAmount": 75526403,
+      "SettlementCurrency": "USD",
+      "BusinessUnitBuySell": "Buy",
+      "SettlementCCYAmount": 54171.86,
+      "TradeIdentification": "EOS243279968",
+      "TradingBusinessUnit": "KR1",
+      "ForeignExchangeTradeProduct": "Fx Spot"
+    }
+  }

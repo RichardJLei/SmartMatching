@@ -94,7 +94,7 @@ async def parse_text(request: ParseTextRequest):
         request (ParseTextRequest): Contains file_id and model selection
         
     Returns:
-        dict: Contains parsing results and status
+        dict: Contains parsing results and status following Refine patterns
         
     Raises:
         HTTPException: If file not found or processing fails
@@ -109,29 +109,62 @@ async def parse_text(request: ParseTextRequest):
         if not file_data.extracted_text:
             raise HTTPException(status_code=404, detail="No extracted text found")
 
-        # Get both parsed result and original text using specified model
+        # Get parsed result using specified model
         result = await TextParser.parse_with_model(
             file_data.extracted_text,
-            request.model_id.value  # Use the enum value
+            request.model_id.value
         )
 
-        # Update database with parsed result only
+        # Update database with parsed result
         await FileService.update_parsed_file(
             request.file_id,
             result['parsed_result'],
             request.model_id.value
         )
 
+        # Return response following Refine patterns
         return {
-            'success': True,
-            'model_used': request.model_id.value,
-            'data': result
+            "data": {
+                "id": str(request.file_id),
+                "status": "completed",
+                "success": True,
+                "model": {
+                    "id": request.model_id.value,
+                    "info": result['model_info']
+                },
+                "result": result['parsed_result'],
+                "metadata": {
+                    "original_text_length": len(file_data.extracted_text),
+                    "processing_timestamp": datetime.utcnow().isoformat()
+                }
+            },
+            "error": None
         }
 
     except HTTPException as he:
-        raise he
+        return {
+            "data": {
+                "id": str(request.file_id),
+                "status": "failed",
+                "success": False
+            },
+            "error": {
+                "code": he.status_code,
+                "message": str(he.detail)
+            }
+        }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {
+            "data": {
+                "id": str(request.file_id),
+                "status": "failed",
+                "success": False
+            },
+            "error": {
+                "code": 500,
+                "message": str(e)
+            }
+        }
 
 @router.get("/test-model-connection")
 async def test_model_connection():

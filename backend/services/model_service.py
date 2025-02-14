@@ -29,104 +29,70 @@ class ModelProvider(str, Enum):
 class BaseModelService(ABC):
     """Abstract base class for AI model services"""
     
-    @abstractmethod
-    async def parse_text(self, text: str) -> Dict[str, Any]:
-        """
-        Parse text using the AI model
-        
-        Args:
-            text (str): Text to parse
+    def __init__(self):
+        """Initialize base model service"""
+        if not OPENAI_AVAILABLE:
+            raise HTTPException(
+                status_code=500,
+                detail="OpenAI package not installed. Please install with 'pip install openai'"
+            )
+        self.settings = get_model_settings()
+        self.instructions = self._load_instructions()
+    
+    def _load_instructions(self) -> str:
+        """Load parsing instructions from rules file"""
+        try:
+            base_path = Path(__file__).parent.parent
+            rules_path = base_path / "utils" / "ConvertBankingConfoInstruction.rules"
+            logger.info(f"Loading rules from: {rules_path}")
             
-        Returns:
-            Dict[str, Any]: Parsed result
-            
-        Raises:
-            HTTPException: If parsing fails
-        """
-        pass
+            with open(rules_path, 'r', encoding='utf-8') as file:
+                return file.read().strip()
+        except Exception as e:
+            logger.error(f"Failed to load instructions: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to load parsing instructions"
+            )
+    
+    def _extract_json_from_response(self, response: str) -> str:
+        """Extract JSON from response that might be wrapped in markdown"""
+        json_pattern = r'```json\s*(.*?)\s*```'
+        matches = re.findall(json_pattern, response, re.DOTALL)
+        return matches[0].strip() if matches else response.strip()
+    
+    async def _process_streaming_response(self, completion) -> str:
+        """Process streaming response from model"""
+        full_response = ""
+        async for chunk in completion:
+            if chunk.choices[0].delta.content:
+                full_response += chunk.choices[0].delta.content
+        return full_response
+    
+    def _create_result(self, parsed_json: Dict, provider: ModelProvider) -> Dict:
+        """Create standardized result dictionary"""
+        return {
+            "parsed_content": parsed_json,
+            "model_info": {
+                "provider": provider.value,
+                "model": self.model_name
+            }
+        }
 
 class NvidiaDeepseekService(BaseModelService):
     """Implementation for Nvidia's Deepseek model"""
     
     def __init__(self):
         """Initialize Nvidia model client"""
-        if not OPENAI_AVAILABLE:
-            raise HTTPException(
-                status_code=500,
-                detail="OpenAI package not installed. Please install with 'pip install openai'"
-            )
-            
-        try:
-            settings = get_model_settings()
-            logger.info(f"Loaded model settings. Base URL: {settings.NVIDIA_BASE_URL}")
-            
-            if not settings.NVIDIA_API_KEY:
-                raise ValueError("NVIDIA_API_KEY is empty")
-                
-            self.client = OpenAI(
-                base_url=settings.NVIDIA_BASE_URL,
-                api_key=settings.NVIDIA_API_KEY
-            )
-            self.model_name = settings.NVIDIA_MODEL_NAME
-            
-            # Load parsing instructions
-            self.instructions = self._load_instructions()
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize NvidiaDeepseekService: {str(e)}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to initialize model service: {str(e)}"
-            )
-    
-    def _load_instructions(self) -> str:
-        """
-        Load parsing instructions from rules file
-        
-        Returns:
-            str: Instructions content
-            
-        Raises:
-            HTTPException: If file cannot be loaded
-        """
-        try:
-            # Get the absolute path to the rules file
-            base_path = Path(__file__).parent.parent  # Go up two levels from services to backend
-            rules_path = base_path / "utils" / "ConvertBankingConfoInstruction.rules"
-            
-            logger.info(f"Loading rules from: {rules_path}")
-            
-            if not rules_path.exists():
-                raise FileNotFoundError(f"Rules file not found at: {rules_path}")
-                
-            with open(rules_path, 'r', encoding='utf-8') as file:
-                content = file.read()
-                
-            if not content:
-                raise ValueError("Rules file is empty")
-                
-            return content
-            
-        except Exception as e:
-            logger.error(f"Failed to load parsing instructions: {str(e)}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to load parsing instructions: {str(e)}"
-            )
-    
+        super().__init__()
+        self.client = OpenAI(
+            base_url=self.settings.NVIDIA_BASE_URL,
+            api_key=self.settings.NVIDIA_API_KEY
+        )
+        self.model_name = self.settings.NVIDIA_MODEL_NAME
+
     async def parse_text(self, text: str) -> Dict[str, Any]:
-        """
-        Parse text using Nvidia's Deepseek model
-        
-        Args:
-            text (str): Text to parse
-            
-        Returns:
-            Dict[str, Any]: Parsed result
-            
-        Raises:
-            HTTPException: If parsing fails
-        """
+        """Parse text using Nvidia's Deepseek model"""
         try:
             logger.info("Starting text parsing with Nvidia model")
             
@@ -179,37 +145,11 @@ class NvidiaDeepseekService(BaseModelService):
                 stream=True
             )
             
-            # Process streaming response
-            logger.info("Processing streaming response")
-            full_response = ""
-            async for chunk in completion:
-                if chunk.choices[0].delta.content:
-                    full_response += chunk.choices[0].delta.content
-                    logger.debug(f"Received chunk: {chunk.choices[0].delta.content}")
+            full_response = await self._process_streaming_response(completion)
+            cleaned_json = self._extract_json_from_response(full_response)
+            parsed_json = json.loads(cleaned_json)
             
-            logger.info(f"Full response length: {len(full_response)}")
-            
-            # Parse the response as JSON
-            try:
-                logger.info("Parsing response as JSON")
-                parsed_json = json.loads(full_response)
-                result = {
-                    "parsed_content": parsed_json,
-                    "model_info": {
-                        "provider": ModelProvider.NVIDIA.value,
-                        "model": self.model_name
-                    }
-                }
-                logger.info("Successfully parsed response")
-                return result
-                
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse model response as JSON: {str(e)}")
-                logger.error(f"Raw response: {full_response}")
-                raise HTTPException(
-                    status_code=500,
-                    detail="Model response was not valid JSON"
-                )
+            return self._create_result(parsed_json, ModelProvider.NVIDIA)
             
         except Exception as e:
             logger.error(f"Nvidia model parsing failed: {str(e)}")
@@ -223,83 +163,12 @@ class DeepSeekChatService(BaseModelService):
     
     def __init__(self):
         """Initialize DeepSeek model client"""
-        if not OPENAI_AVAILABLE:
-            raise HTTPException(
-                status_code=500,
-                detail="OpenAI package not installed. Please install with 'pip install openai'"
-            )
-            
-        try:
-            settings = get_model_settings()
-            logger.info(f"Loaded model settings for DeepSeek")
-            
-            if not settings.DEEPSEEK_API_KEY:
-                raise ValueError("DEEPSEEK_API_KEY is empty")
-                
-            self.client = OpenAI(
-                base_url=settings.DEEPSEEK_BASE_URL,
-                api_key=settings.DEEPSEEK_API_KEY
-            )
-            self.model_name = settings.DEEPSEEK_MODEL_NAME
-            
-            # Load parsing instructions
-            self.instructions = self._load_instructions()
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize DeepSeekChatService: {str(e)}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to initialize model service: {str(e)}"
-            )
-    
-    def _load_instructions(self) -> str:
-        """Load parsing instructions from rules file"""
-        try:
-            base_path = Path(__file__).parent.parent
-            rules_path = base_path / "utils" / "ConvertBankingConfoInstruction.rules"
-            
-            logger.info(f"Loading rules from: {rules_path}")
-            
-            if not rules_path.exists():
-                raise FileNotFoundError(f"Rules file not found at: {rules_path}")
-                
-            with open(rules_path, 'r', encoding='utf-8') as file:
-                content = file.read()
-                
-            if not content:
-                raise ValueError("Rules file is empty")
-                
-            return content
-            
-        except Exception as e:
-            logger.error(f"Failed to load parsing instructions: {str(e)}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to load parsing instructions: {str(e)}"
-            )
-    
-    def _extract_json_from_response(self, response: str) -> str:
-        """
-        Extract JSON from response that might be wrapped in markdown code blocks
-        
-        Args:
-            response (str): Raw response from model
-            
-        Returns:
-            str: Cleaned JSON string
-            
-        Raises:
-            ValueError: If no JSON found in response
-        """
-        # Try to find JSON between ```json and ``` markers
-        json_pattern = r'```json\s*(.*?)\s*```'
-        matches = re.findall(json_pattern, response, re.DOTALL)
-        
-        if matches:
-            return matches[0].strip()
-        
-        # If no markdown blocks found, return the original response
-        return response.strip()
+        super().__init__()
+        self.client = OpenAI(
+            base_url=self.settings.DEEPSEEK_BASE_URL,
+            api_key=self.settings.DEEPSEEK_API_KEY
+        )
+        self.model_name = self.settings.DEEPSEEK_MODEL_NAME
 
     async def parse_text(self, text: str) -> Dict[str, Any]:
         """Parse text using DeepSeek Chat model"""
@@ -312,7 +181,7 @@ class DeepSeekChatService(BaseModelService):
             
             {self.instructions}
             
-            Important: Return only the JSON object without any markdown formatting or additional text."""
+            Important: Return only the JSON object without markdown formatting or additional text."""
             
             messages = [
                 {"role": "system", "content": system_prompt},
@@ -327,40 +196,11 @@ class DeepSeekChatService(BaseModelService):
                 stream=True
             )
             
-            logger.info("Processing streaming response")
-            full_response = ""
-            for chunk in completion:
-                if chunk.choices[0].delta.content is not None:
-                    full_response += chunk.choices[0].delta.content
-                    logger.debug(f"Received chunk: {chunk.choices[0].delta.content}")
+            full_response = await self._process_streaming_response(completion)
+            cleaned_json = self._extract_json_from_response(full_response)
+            parsed_json = json.loads(cleaned_json)
             
-            logger.info(f"Full response length: {len(full_response)}")
-            logger.debug(f"Raw response: {full_response}")
-            
-            try:
-                # Clean the response before parsing
-                cleaned_json_str = self._extract_json_from_response(full_response)
-                logger.debug(f"Cleaned JSON string: {cleaned_json_str}")
-                
-                logger.info("Parsing response as JSON")
-                parsed_json = json.loads(cleaned_json_str)
-                result = {
-                    "parsed_content": parsed_json,
-                    "model_info": {
-                        "provider": ModelProvider.OPENAI.value,
-                        "model": self.model_name
-                    }
-                }
-                logger.info("Successfully parsed response")
-                return result
-                
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse model response as JSON: {str(e)}")
-                logger.error(f"Raw response: {full_response}")
-                raise HTTPException(
-                    status_code=500,
-                    detail="Model response was not valid JSON"
-                )
+            return self._create_result(parsed_json, ModelProvider.OPENAI)
             
         except Exception as e:
             logger.error(f"DeepSeek model parsing failed: {str(e)}")
