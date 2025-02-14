@@ -1,9 +1,11 @@
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
-from .database import Base
+from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.schema import DefaultClause
 from sqlalchemy.sql.expression import text
 from sqlalchemy.orm import relationship
+
+Base = declarative_base()
 
 class ConfirmationFile(Base):
     """
