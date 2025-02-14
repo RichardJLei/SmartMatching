@@ -1,0 +1,25 @@
+{
+    "model_info": {
+      "model": "deepseek-chat",
+      "provider": "openai"
+    },
+    "parsed_content": {
+      "MsgSender": "The Hongkong and Shanghai Banking Corporation Limited",
+      "TradeDate": "2024-11-22",
+      "ValueDate": "2024-11-26",
+      "MsgReceiver": "READY KOREA CO LTD",
+      "Counterparty": "READY KOREA CO LTD",
+      "ForwardPoints": null,
+      "SettlementDate": "2024-11-26",
+      "SettlementRate": 1394.2,
+      "TradingCurrency": "KRW",
+      "CreationDateTime": "2024-11-22",
+      "TradingCCYAmount": 75526403,
+      "SettlementCurrency": "USD",
+      "BusinessUnitBuySell": "Sell",
+      "SettlementCCYAmount": 54171.86,
+      "TradeIdentification": "EOS243279968",
+      "TradingBusinessUnit": "The Hongkong and Shanghai Banking Corporation Limited",
+      "ForeignExchangeTradeProduct": "Deliverable FX"
+    }
+  }

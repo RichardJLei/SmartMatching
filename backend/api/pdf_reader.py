@@ -9,6 +9,7 @@ from sqlalchemy import select, update
 from datetime import datetime
 from services.file_service import FileService
 from utils.text_parser import TextParser
+from services.model_service import ModelFactory
 
 router = APIRouter(
     prefix="/api",
@@ -23,7 +24,7 @@ class LocationType(str, Enum):
 
 class ModelType(str, Enum):
     """Enum for supported parsing models"""
-    DEEPSEEK_R1 = "deepseek_r1"
+    DEEPSEEK_CHAT = "deepseek_chat"
     NVIDIA_DEEPSEEK_R1 = "nvidia_deepseek_r1"
     # Add more models as needed
 
@@ -38,10 +39,10 @@ class ParseTextRequest(BaseModel):
     
     Attributes:
         file_id: Unique identifier of the file to parse
-        model_id: Model to use for parsing, defaults to DEEPSEEK_R1
+        model_id: Model to use for parsing, defaults to NVIDIA_DEEPSEEK_R1
     """
     file_id: UUID4
-    model_id: ModelType = ModelType.DEEPSEEK_R1
+    model_id: ModelType = ModelType.NVIDIA_DEEPSEEK_R1
 
 @router.post("/extract-text")
 async def extract_text(request: PDFReadRequest):
@@ -130,4 +131,17 @@ async def parse_text(request: ParseTextRequest):
     except HTTPException as he:
         raise he
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) 
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/test-model-connection")
+async def test_model_connection():
+    """Test the model API connection"""
+    try:
+        service = ModelFactory.get_model_service("nvidia_deepseek_r1")
+        result = await service.parse_text("Test connection")
+        return {"status": "success", "message": "Model connection successful"}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Model connection test failed: {str(e)}"
+        ) 
