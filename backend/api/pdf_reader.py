@@ -10,6 +10,10 @@ from datetime import datetime
 from services.file_service import FileService
 from utils.text_parser import TextParser
 from services.model_service import ModelFactory
+import logging
+
+# Initialize logger
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api",
@@ -114,11 +118,38 @@ async def parse_text(request: ParseTextRequest):
             file_data.extracted_text,
             request.model_id.value
         )
+        
+        # Log the result structure for debugging
+        logger.info(f"Result from TextParser: {result}")
+        
+        # Ensure result has the expected structure
+        if not isinstance(result, dict):
+            raise ValueError(f"Expected dict result, got {type(result)}")
+            
+        # Get parsed_content with fallback
+        parsed_content = result.get('parsed_content', result)
+        model_info = result.get('model_info', {'provider': 'unknown', 'model': request.model_id.value})
+
+        # Remove original_text if it exists in parsed_content
+        if isinstance(parsed_content, dict):
+            parsed_content.pop('original_text', None)
+
+        # Create database-ready parsed result
+        db_parsed_result = {
+            "content": parsed_content,
+            "model": {
+                "id": request.model_id.value,
+                "info": model_info
+            },
+            "metadata": {
+                "processing_timestamp": datetime.utcnow().isoformat()
+            }
+        }
 
         # Update database with parsed result
         await FileService.update_parsed_file(
             request.file_id,
-            result['parsed_result'],
+            db_parsed_result,
             request.model_id.value
         )
 
@@ -130,9 +161,9 @@ async def parse_text(request: ParseTextRequest):
                 "success": True,
                 "model": {
                     "id": request.model_id.value,
-                    "info": result['model_info']
+                    "info": model_info
                 },
-                "result": result['parsed_result'],
+                "result": parsed_content,
                 "metadata": {
                     "original_text_length": len(file_data.extracted_text),
                     "processing_timestamp": datetime.utcnow().isoformat()
@@ -141,19 +172,10 @@ async def parse_text(request: ParseTextRequest):
             "error": None
         }
 
-    except HTTPException as he:
-        return {
-            "data": {
-                "id": str(request.file_id),
-                "status": "failed",
-                "success": False
-            },
-            "error": {
-                "code": he.status_code,
-                "message": str(he.detail)
-            }
-        }
     except Exception as e:
+        logger.error(f"Error in parse_text: {str(e)}")
+        logger.error(f"Error type: {type(e)}")
+        logger.error("Error traceback: ", exc_info=True)
         return {
             "data": {
                 "id": str(request.file_id),

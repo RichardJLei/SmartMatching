@@ -174,7 +174,6 @@ class DeepSeekChatService(BaseModelService):
         """Parse text using DeepSeek Chat model"""
         try:
             logger.info("Starting text parsing with DeepSeek model")
-            logger.info(f"Input text length: {len(text)}")
             
             system_prompt = f"""You are a financial document parser. 
             Follow these instructions to extract information:
@@ -188,22 +187,56 @@ class DeepSeekChatService(BaseModelService):
                 {"role": "user", "content": text}
             ]
             
-            logger.info("Making API request to DeepSeek model")
+            logger.info(f"Sending request to model: {self.model_name}")
             completion = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=messages,
                 temperature=0.2,
-                stream=True
+                stream=False
             )
             
-            full_response = await self._process_streaming_response(completion)
-            cleaned_json = self._extract_json_from_response(full_response)
-            parsed_json = json.loads(cleaned_json)
+            logger.info("Got response from model")
+            response = completion.choices[0].message.content
+            logger.info(f"Raw response: {response[:200]}...")  # Log first 200 chars
             
-            return self._create_result(parsed_json, ModelProvider.OPENAI)
+            logger.info("Cleaning JSON response")
+            cleaned_json = self._extract_json_from_response(response)
+            logger.info(f"Cleaned JSON: {cleaned_json[:200]}...")  # Log first 200 chars
+            
+            logger.info("Parsing JSON")
+            parsed_json = json.loads(cleaned_json)
+            logger.info(f"Parsed JSON type: {type(parsed_json)}")
+            logger.info(f"Parsed JSON keys: {parsed_json.keys() if isinstance(parsed_json, dict) else 'Not a dict'}")
+            
+            # Ensure parsed_json is a dictionary before creating result
+            if not isinstance(parsed_json, dict):
+                logger.error(f"Parsed JSON is not a dictionary: {type(parsed_json)}")
+                raise ValueError("Parsed JSON must be a dictionary")
+                
+            # Create result with explicit structure
+            logger.info("Creating result structure")
+            result = {
+                "parsed_content": parsed_json,
+                "model_info": {
+                    "provider": ModelProvider.OPENAI.value,
+                    "model": self.model_name
+                }
+            }
+            
+            logger.info(f"Final result keys: {result.keys()}")
+            logger.info(f"Final result structure: {json.dumps(result, indent=2)[:200]}...")
+            
+            return result
             
         except Exception as e:
             logger.error(f"DeepSeek model parsing failed: {str(e)}")
+            logger.error(f"Error type: {type(e)}")
+            logger.error(f"Error traceback: ", exc_info=True)
+            # Log the actual response for debugging
+            logger.error(f"Response content: {response if 'response' in locals() else 'No response'}")
+            logger.error(f"Cleaned JSON: {cleaned_json if 'cleaned_json' in locals() else 'No cleaned JSON'}")
+            if 'result' in locals():
+                logger.error(f"Result structure: {result}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Model parsing failed: {str(e)}"

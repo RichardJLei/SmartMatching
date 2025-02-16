@@ -1,0 +1,38 @@
+Read the provided document, then generate exactly one valid JSON object containing the following fields. If any field (including addresses) is not explicitly found or clearly specified in the text, fill it with null. Adhere strictly to this structure and avoid adding extra keys or commentary.
+
+{
+  "MsgSender": {
+    "Name":    "Sender’s name (if found, otherwise null)",
+    "Address": "Sender’s address (if found, otherwise null)"
+  },
+  "MsgReceiver": {
+    "Name":    "Receiver’s name (if found, otherwise null)",
+    "Address": "Receiver’s address (if found, otherwise null)"
+  },
+  "CreationDateTime": "Creation date in YYYY-MM-DD format or null",
+  "TradingParty":     "Initiator of this trade (sometimes referred to as Party A), or null",
+  "CounterParty":     "The counterparty to this trade (Party B), or null",
+  "TradeType":        "One of: ForeignExchangeForward, ForeignExchangeNonDeliverableForward, ForeignExchangeSpot, ForeignExchangeSWAP; or null",
+  "TradeRef":         "The trade reference, or null",
+  "TradeUTI":         "The trade identification, or null",
+  "SettlementRate": "Exchange rate, if available, otherwise null",
+  "ForwardPoints":  "Forward points, if any, otherwise null",
+  "ClearingMethod":   "GrossNegotiation if single-entry settlement, NetNegotiation if netting, or null if not specified",
+  "transactions": [
+    {
+      "TradeDate":      "Trade execution date (YYYY-MM-DD) or null",
+      "SettlementDate": "Settlement date (YYYY-MM-DD) or null",
+      "Currency":       "Currency of the amount, or null",
+      "Amount":         "Positive for cash inflow, negative for cash outflow (from TradingParty's perspective), or null",
+    }
+    // Repeat additional objects here for multiple transactions.
+  ]
+}
+
+
+Output Requirements
+
+Provide exactly one JSON object in the format shown above.
+Use an array for "transactions" if multiple transaction legs are present.
+If any field is not found in the text, set it to null.
+No extra keys, text, or explanations should appear in the output.
