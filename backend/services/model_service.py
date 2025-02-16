@@ -175,12 +175,9 @@ class DeepSeekChatService(BaseModelService):
         try:
             logger.info("Starting text parsing with DeepSeek model")
             
-            system_prompt = f"""You are a financial document parser. 
-            Follow these instructions to extract information:
+            system_prompt = f"""
             
-            {self.instructions}
-            
-            Important: Return only the JSON object without markdown formatting or additional text."""
+            {self.instructions}"""
             
             messages = [
                 {"role": "system", "content": system_prompt},

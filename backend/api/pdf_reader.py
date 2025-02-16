@@ -130,10 +130,6 @@ async def parse_text(request: ParseTextRequest):
         parsed_content = result.get('parsed_content', result)
         model_info = result.get('model_info', {'provider': 'unknown', 'model': request.model_id.value})
 
-        # Remove original_text if it exists in parsed_content
-        if isinstance(parsed_content, dict):
-            parsed_content.pop('original_text', None)
-
         # Create database-ready parsed result
         db_parsed_result = {
             "content": parsed_content,
