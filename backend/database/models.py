@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, func, Integer
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, func, Integer, UniqueConstraint, Boolean
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.schema import DefaultClause
@@ -60,11 +60,33 @@ class ParsingResult(Base):
     # Relationship to confirmation file
     file = relationship("ConfirmationFile", back_populates="parsing_results")
 
-class EntityNames(Base):
-    __tablename__ = 'entity_names'
+class PartyCode(Base):
+    """
+    Model for storing party information and their codes.
+    
+    Attributes:
+        party_code_id (UUID): Primary key
+        party_code (str): Generated unique code for the party
+        msger_name (str): Name from MsgSender/MsgReceiver
+        msger_address (str): Address from MsgSender/MsgReceiver
+        party_name (str): Name from TradingParty/CounterParty
+        party_role (str): Role of the party (bank/corporate)
+        is_active (bool): Status flag
+    """
+    __tablename__ = "party_codes"
+    
+    party_code_id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    party_code = Column(String(100), nullable=False)
+    msger_name = Column(String(255), nullable=False)
+    msger_address = Column(Text)
+    party_name = Column(String(255), nullable=False)
+    party_role = Column(String(50), nullable=False)  # 'bank' or 'corporate'
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    long_name_id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    short_name = Column(String)
-    long_name = Column(String, unique=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow) 
+    # Unique constraints
+    __table_args__ = (
+        UniqueConstraint('party_code', name='unique_party_code'),
+        UniqueConstraint('msger_name', 'party_name', 'party_role', name='unique_party_combination'),
+    ) 
