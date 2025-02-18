@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, func, Integer, UniqueConstraint, Boolean
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, func, Integer, UniqueConstraint, Boolean, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.schema import DefaultClause
@@ -48,6 +48,7 @@ class ParsingResult(Base):
         created_at (datetime): Record creation timestamp
         updated_at (datetime): Last update timestamp
         file (relationship): Related confirmation file
+        matching_units (relationship): Related matching units
     """
     __tablename__ = "parsing_results"
     
@@ -59,6 +60,9 @@ class ParsingResult(Base):
     
     # Relationship to confirmation file
     file = relationship("ConfirmationFile", back_populates="parsing_results")
+
+    # Add relationship to matching units
+    matching_units = relationship("MatchingUnit", back_populates="parsing_result", cascade="all, delete")
 
 class PartyCode(Base):
     """
@@ -89,4 +93,58 @@ class PartyCode(Base):
     __table_args__ = (
         UniqueConstraint('party_code', name='unique_party_code'),
         UniqueConstraint('msger_name', 'party_name', 'party_role', name='unique_party_combination'),
+    ) 
+
+class MatchingUnit(Base):
+    """
+    Model for storing matching units derived from parsing results.
+    Each record represents one pair of pay & receive legs on the same settlement date.
+    
+    Attributes:
+        matching_unit_id (UUID): Primary key
+        parsing_result_id (UUID): Foreign key to parsing_results
+        matching_status (str): Status of matching (unmatched/matched)
+        trade_type (str): Type of trade
+        trade_date (date): Date of trade
+        settlement_date (date): Settlement date
+        trading_party_code (str): Code for trading party
+        counterparty_code (str): Code for counter party
+        trade_ref (str): Trade reference number
+        trade_uti (str): Unique trade identifier
+        settlement_rate (str): Settlement rate if applicable
+        transaction_details (JSONB): Pay/receive leg details
+        created_at (datetime): Record creation timestamp
+        updated_at (datetime): Last update timestamp
+    """
+    __tablename__ = "matching_units"
+    
+    matching_unit_id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    parsing_result_id = Column(UUID(as_uuid=True), ForeignKey('parsing_results.parsing_result_id', ondelete='CASCADE'), nullable=False)
+    matching_status = Column(String(50), nullable=False, default='unmatched')
+    trade_type = Column(String(50))
+    trade_date = Column(DateTime(timezone=True))
+    settlement_date = Column(DateTime(timezone=True))
+    trading_party_code = Column(String(100), nullable=False)
+    counterparty_code = Column(String(100), nullable=False)
+    trade_ref = Column(String(100))
+    trade_uti = Column(String(255))
+    settlement_rate = Column(String(50))
+    transaction_details = Column(JSONB, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    # Relationship to parsing result
+    parsing_result = relationship("ParsingResult", back_populates="matching_units")
+
+    # Add constraints
+    __table_args__ = (
+        UniqueConstraint('trade_uti', name='unique_trade_uti'),
+        CheckConstraint(
+            "transaction_details ? 'pay_leg' AND transaction_details ? 'receive_leg'",
+            name='check_transaction_details_structure'
+        ),
+        CheckConstraint(
+            "matching_status IN ('unmatched', 'matched')",
+            name='check_matching_status'
+        )
     ) 
