@@ -45,6 +45,7 @@ class ParsingResult(Base):
         parsing_result_id (UUID): Primary key, unique identifier
         file_id (UUID): Foreign key to confirmation_files
         parsed_json (dict): Structured data from parsing
+        matching_unit_ids (JSONB): Array of related matching unit IDs
         created_at (datetime): Record creation timestamp
         updated_at (datetime): Last update timestamp
         file (relationship): Related confirmation file
@@ -55,6 +56,7 @@ class ParsingResult(Base):
     parsing_result_id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     file_id = Column(UUID(as_uuid=True), ForeignKey('confirmation_files.file_id', ondelete='CASCADE'), nullable=False)
     parsed_json = Column(JSONB)
+    matching_unit_ids = Column(JSONB, default=lambda: [], server_default='[]')
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
@@ -63,6 +65,14 @@ class ParsingResult(Base):
 
     # Add relationship to matching units
     matching_units = relationship("MatchingUnit", back_populates="parsing_result", cascade="all, delete")
+
+    # Add constraint to ensure matching_unit_ids is an array
+    __table_args__ = (
+        CheckConstraint(
+            "jsonb_typeof(matching_unit_ids) = 'array'",
+            name='check_matching_unit_ids_is_array'
+        ),
+    )
 
 class PartyCode(Base):
     """
