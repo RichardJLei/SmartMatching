@@ -1,25 +1,49 @@
 {
-    "model_info": {
-      "model": "deepseek-chat",
-      "provider": "openai"
-    },
-    "parsed_content": {
-      "MsgSender": "ReadyKorea Co Ltd",
-      "TradeDate": "2024-11-22",
-      "ValueDate": "2024-11-26",
-      "MsgReceiver": "HK and Shanghai Banking Corp Ltd",
-      "Counterparty": "HSBC_KR_001",
-      "ForwardPoints": null,
-      "SettlementDate": "2024-11-26",
-      "SettlementRate": 1394.2,
-      "TradingCurrency": "KRW",
-      "CreationDateTime": "2025-02-10",
-      "TradingCCYAmount": 75526403,
-      "SettlementCurrency": "USD",
-      "BusinessUnitBuySell": "Buy",
-      "SettlementCCYAmount": 54171.86,
-      "TradeIdentification": "EOS243279968",
-      "TradingBusinessUnit": "KR1",
-      "ForeignExchangeTradeProduct": "Fx Spot"
-    }
-  }
+  "MsgSender": {
+      "Name": "WiseTech Global (Trading) Pty Ltd",
+      "Address": null
+  },
+  "MsgReceiver": {
+      "Name": "HSBC Bank Australia Limited",
+      "Address": null
+  },
+  "CreationDateTime": "2025-02-16",
+  "TradingParty": "WiseTech Global (Trading) Pty Ltd",
+  "CounterParty": "HSBC_AU_001",
+  "TradeType": "ForeignExchangeSWAP",
+  "TradeRef": "WTGT_SWP_20241001 IE3 ICL FV Hedge (2)",
+  "TradeUTI": null,
+  "SettlementRate": "1.1167000",
+  "ForwardPoints": "0.0000000",
+  "ClearingMethod": null,
+  "transactions": [
+      {
+          "TradeDate": "2024-10-01",
+          "SettlementDate": "2024-10-01",
+          "Currency": "EUR",
+          "Amount": "5500000.00",
+          "BuyrOrSell": "Sell"
+      },
+      {
+          "TradeDate": "2024-10-01",
+          "SettlementDate": "2024-10-01",
+          "Currency": "USD",
+          "Amount": "6141850.00",
+          "BuyrOrSell": "Buy"
+      },
+      {
+          "TradeDate": "2024-10-01",
+          "SettlementDate": "2024-12-27",
+          "Currency": "EUR",
+          "Amount": "5500000.00",
+          "BuyrOrSell": "Buy"
+      },
+      {
+          "TradeDate": "2024-10-01",
+          "SettlementDate": "2024-12-27",
+          "Currency": "USD",
+          "Amount": "6162200.00",
+          "BuyrOrSell": "Sell"
+      }
+  ]
+}

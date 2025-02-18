@@ -1,25 +1,35 @@
 {
-    "model_info": {
-      "model": "deepseek-chat",
-      "provider": "openai"
-    },
-    "parsed_content": {
-      "MsgSender": "The Hongkong and Shanghai Banking Corporation Limited",
-      "TradeDate": "2024-11-22",
-      "ValueDate": "2024-11-26",
-      "MsgReceiver": "READY KOREA CO LTD",
-      "Counterparty": "READY KOREA CO LTD",
-      "ForwardPoints": null,
-      "SettlementDate": "2024-11-26",
-      "SettlementRate": 1394.2,
-      "TradingCurrency": "KRW",
-      "CreationDateTime": "2024-11-22",
-      "TradingCCYAmount": 75526403,
-      "SettlementCurrency": "USD",
-      "BusinessUnitBuySell": "Sell",
-      "SettlementCCYAmount": 54171.86,
-      "TradeIdentification": "EOS243279968",
-      "TradingBusinessUnit": "The Hongkong and Shanghai Banking Corporation Limited",
-      "ForeignExchangeTradeProduct": "Deliverable FX"
-    }
-  }
+  "MsgSender": {
+      "Name": "HSBC Bank Australia Limited",
+      "Address": "Level 38, Tower 1, International Towers Sydney 100 Barangaroo Avenue, Sydney, NSW 2000"
+  },
+  "MsgReceiver": {
+      "Name": "WISETECH GLOBAL (TRADING) PTY LTD",
+      "Address": "U 3A 72 O RIORDAN ST, ALEXANDRIA SYDNEY 2015, AUSTRALIA"
+  },
+  "CreationDateTime": "2024-09-27",
+  "TradingParty": "The Hongkong and Shanghai Banking Corporation Limited",
+  "CounterParty": "WISETECH GLOBAL (TRADING) PTY LTD",
+  "TradeType": null,
+  "TradeRef": "SPT242719967",
+  "TradeUTI": "DY9DBNI4W8J63Z298033EFX20240927TKC0AG01K8S36V8Q",
+  "SettlementRate": "1.1167000",
+  "ForwardPoints": null,
+  "ClearingMethod": null,
+  "transactions": [
+      {
+          "TradeDate": "2024-09-27",
+          "SettlementDate": "2024-10-01",
+          "Currency": "USD",
+          "Amount": "6141850.00",
+          "BuyrOrSell": "Sell"
+      },
+      {
+          "TradeDate": "2024-09-27",
+          "SettlementDate": "2024-10-01",
+          "Currency": "EUR",
+          "Amount": "5500000.00",
+          "BuyrOrSell": "Buy"
+      }
+  ]
+}

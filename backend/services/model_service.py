@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -170,21 +171,28 @@ class DeepSeekChatService(BaseModelService):
         )
         self.model_name = self.settings.DEEPSEEK_MODEL_NAME
 
-    async def parse_text(self, text: str) -> Dict[str, Any]:
-        """Parse text using DeepSeek Chat model"""
+    def _validate_request(self, text: str) -> None:
+        """Validate the request parameters"""
+        if not text or not isinstance(text, str):
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid input: text must be a non-empty string"
+            )
+        
+        if len(text.strip()) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid input: text cannot be empty or whitespace only"
+            )
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        reraise=True
+    )
+    async def _make_model_request(self, messages: list) -> str:
+        """Make request to the model with retry logic"""
         try:
-            logger.info("Starting text parsing with DeepSeek model")
-            
-            system_prompt = f"""
-            
-            {self.instructions}"""
-            
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": text}
-            ]
-            
-            logger.info(f"Sending request to model: {self.model_name}")
             completion = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=messages,
@@ -192,52 +200,90 @@ class DeepSeekChatService(BaseModelService):
                 stream=False
             )
             
-            logger.info("Got response from model")
-            response = completion.choices[0].message.content
-            logger.info(f"Raw response: {response[:200]}...")  # Log first 200 chars
-            
-            logger.info("Cleaning JSON response")
-            cleaned_json = self._extract_json_from_response(response)
-            logger.info(f"Cleaned JSON: {cleaned_json[:200]}...")  # Log first 200 chars
-            
-            logger.info("Parsing JSON")
-            parsed_json = json.loads(cleaned_json)
-            logger.info(f"Parsed JSON type: {type(parsed_json)}")
-            logger.info(f"Parsed JSON keys: {parsed_json.keys() if isinstance(parsed_json, dict) else 'Not a dict'}")
-            
-            # Ensure parsed_json is a dictionary before creating result
-            if not isinstance(parsed_json, dict):
-                logger.error(f"Parsed JSON is not a dictionary: {type(parsed_json)}")
-                raise ValueError("Parsed JSON must be a dictionary")
+            if not completion or not completion.choices:
+                raise ValueError("Empty response from model")
                 
-            # Create result with explicit structure
-            logger.info("Creating result structure")
-            result = {
-                "parsed_content": parsed_json,
-                "model_info": {
-                    "provider": ModelProvider.OPENAI.value,
-                    "model": self.model_name
-                }
-            }
+            response_content = completion.choices[0].message.content
+            if not response_content:
+                raise ValueError("Empty content in model response")
+                
+            return response_content
             
-            logger.info(f"Final result keys: {result.keys()}")
-            logger.info(f"Final result structure: {json.dumps(result, indent=2)[:200]}...")
+        except Exception as e:
+            logger.error(f"Model request failed: {str(e)}")
+            raise
+
+    async def parse_text(self, text: str) -> Dict[str, Any]:
+        """Parse text using DeepSeek Chat model"""
+        try:
+            # Validate input
+            self._validate_request(text)
             
-            return result
+            logger.info("Starting text parsing with DeepSeek model")
             
+            # Prepare messages
+            system_prompt = f"""
+            Please return the response in valid JSON format.
+            {self.instructions}
+            """
+            
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text}
+            ]
+            
+            # Make request with retry logic
+            response_content = await self._make_model_request(messages)
+            
+            logger.info(f"Raw response: {response_content[:200]}...")
+            
+            # Try parsing the raw response first
+            try:
+                return self._create_result(json.loads(response_content), ModelProvider.OPENAI)
+            except json.JSONDecodeError:
+                # If parsing fails, try to clean and repair the JSON
+                cleaned_json = self._clean_and_repair_json(response_content)
+                return self._create_result(cleaned_json, ModelProvider.OPENAI)
+                
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"DeepSeek model parsing failed: {str(e)}")
             logger.error(f"Error type: {type(e)}")
-            logger.error(f"Error traceback: ", exc_info=True)
-            # Log the actual response for debugging
-            logger.error(f"Response content: {response if 'response' in locals() else 'No response'}")
-            logger.error(f"Cleaned JSON: {cleaned_json if 'cleaned_json' in locals() else 'No cleaned JSON'}")
-            if 'result' in locals():
-                logger.error(f"Result structure: {result}")
+            logger.error("Error traceback: ", exc_info=True)
             raise HTTPException(
                 status_code=500,
                 detail=f"Model parsing failed: {str(e)}"
             )
+
+    def _clean_and_repair_json(self, response_content: str) -> Dict:
+        """Clean and repair JSON response"""
+        try:
+            # Basic cleaning
+            cleaned_response = response_content.strip().replace('\n', '').replace('\t', '')
+            
+            # Extract JSON structure
+            try:
+                start_index = cleaned_response.index('{')
+                end_index = cleaned_response.rindex('}') + 1
+                extracted_json = cleaned_response[start_index:end_index]
+            except ValueError:
+                raise ValueError("Could not find valid JSON structure in response")
+            
+            # Remove any non-JSON characters
+            extracted_json = re.sub(r'^[^\{]*', '', extracted_json)
+            extracted_json = re.sub(r'[^\}]*$', '', extracted_json)
+            
+            # Fix common JSON issues
+            fixed_json = extracted_json.replace("'", '"')
+            fixed_json = re.sub(r',\s*}', '}', fixed_json)
+            fixed_json = re.sub(r',\s*]', ']', fixed_json)
+            
+            return json.loads(fixed_json)
+            
+        except Exception as e:
+            logger.error(f"JSON cleaning failed: {str(e)}")
+            raise ValueError(f"Failed to clean and repair JSON: {str(e)}")
 
 class ModelFactory:
     """Factory for creating model service instances"""
