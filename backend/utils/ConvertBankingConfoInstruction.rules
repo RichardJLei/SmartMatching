@@ -25,7 +25,8 @@ Read the provided document, then generate exactly one valid JSON object containi
       "TradeDate":      "Trade execution date (YYYY-MM-DD) or null",
       "SettlementDate": "Settlement date (YYYY-MM-DD) or null",
       "Currency":       "Currency of the amount, or null",
-      "Amount":         "Positive for cash inflow, negative for cash outflow (from TradingParty's perspective), or null",
+      "Amount":         "Absolute amount, or null",
+      "BuyrOrSell":      "Buy if trading party receives this amount, Sell if trading party pays this amount, or null if not specified"
     }
     // Repeat additional objects here for multiple transactions.
   ]
