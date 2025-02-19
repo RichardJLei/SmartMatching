@@ -160,26 +160,27 @@ async def parse_text(request: ParseTextRequest):
         dict: Contains parsing results and status following Refine patterns
         
     Raises:
-        HTTPException: If file not found or processing fails
+        HTTPException: If parsing fails or file not found
     """
-    try:
-        file_data = await FileService.get_extracted_file(request.file_id)
-        
-        if not file_data:
-            raise HTTPException(status_code=404, detail="File not found")
-        if file_data.processing_status != 'extracted':
-            raise HTTPException(status_code=400, detail="File text not yet extracted")
-        if not file_data.extracted_text:
-            raise HTTPException(status_code=404, detail="No extracted text found")
+    # Get file data and validate
+    file_data = await FileService.get_extracted_file(request.file_id)
+    
+    if not file_data:
+        raise HTTPException(status_code=404, detail="File not found")
+    if file_data.processing_status != 'extracted':
+        raise HTTPException(status_code=400, detail="File text not yet extracted")
+    if not file_data.extracted_text:
+        raise HTTPException(status_code=404, detail="No extracted text found")
 
+    try:
         # Get parsed result using specified model
         result = await TextParser.parse_with_model(
             file_data.extracted_text,
             request.model_id.value
         )
         
-        # Log the result structure for debugging
-        logger.info(f"Result from TextParser: {result}")
+        # Log only essential information
+        logger.info(f"Received parsing result for file_id: {request.file_id}")
         
         # Ensure result has the expected structure
         if not isinstance(result, dict):
@@ -187,7 +188,10 @@ async def parse_text(request: ParseTextRequest):
             
         # Get parsed_content with fallback
         parsed_content = result.get('parsed_content', result)
-        model_info = result.get('model_info', {'provider': 'unknown', 'model': request.model_id.value})
+        model_info = result.get('model_info', {
+            'provider': 'unknown', 
+            'model': request.model_id.value
+        })
 
         # Create database-ready parsed result
         db_parsed_result = {
@@ -197,21 +201,23 @@ async def parse_text(request: ParseTextRequest):
                 "info": model_info
             },
             "metadata": {
-                "processing_timestamp": datetime.utcnow().isoformat()
+                "processing_timestamp": datetime.utcnow().isoformat(),
+                "original_text_length": len(file_data.extracted_text)
             }
         }
 
-        # Update database with parsed result
-        await FileService.update_parsed_file(
-            request.file_id,
-            db_parsed_result,
-            request.model_id.value
+        # Update database with parsed result and handle versioning
+        parsing_result = await FileService.create_parsing_result(
+            file_id=request.file_id,
+            parsed_data=db_parsed_result,
+            model_id=request.model_id.value
         )
 
-        # Return response following Refine patterns
+        # Return successful response
         return {
             "data": {
                 "id": str(request.file_id),
+                "parsing_result_id": str(parsing_result.parsing_result_id),
                 "status": "completed",
                 "success": True,
                 "model": {
@@ -220,28 +226,21 @@ async def parse_text(request: ParseTextRequest):
                 },
                 "result": parsed_content,
                 "metadata": {
+                    "version": parsing_result.version,
+                    "is_latest": parsing_result.latest,
                     "original_text_length": len(file_data.extracted_text),
                     "processing_timestamp": datetime.utcnow().isoformat()
                 }
-            },
-            "error": None
+            }
         }
 
     except Exception as e:
-        logger.error(f"Error in parse_text: {str(e)}")
         logger.error(f"Error type: {type(e)}")
-        logger.error("Error traceback: ", exc_info=True)
-        return {
-            "data": {
-                "id": str(request.file_id),
-                "status": "failed",
-                "success": False
-            },
-            "error": {
-                "code": 500,
-                "message": str(e)
-            }
-        }
+        logger.error(f"Error in parse_text: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Parsing failed: {str(e)}"
+        )
 
 @router.get("/test-model-connection")
 async def test_model_connection():

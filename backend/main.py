@@ -4,12 +4,32 @@ import logging
 from api.routes import pdf
 from api import pdf_reader
 
-# Configure logging with more detail
+class SensitiveDataFilter(logging.Filter):
+    """Filter out sensitive and verbose data from logs"""
+    def filter(self, record):
+        # Skip long messages containing request/response data
+        if 'Request options' in str(record.msg):
+            return False
+        if 'HTTP Response' in str(record.msg):
+            return False
+        if 'messages' in str(record.msg):
+            return False
+        return True
+
+# Configure logging with filter
+logging.getLogger("openai").setLevel(logging.WARNING)  # Reduce OpenAI logging
+logging.getLogger("httpx").setLevel(logging.WARNING)   # Reduce HTTP client logging
+logging.getLogger("httpcore").setLevel(logging.WARNING)  # Reduce HTTP core logging
+
+# Configure root logger
+logger = logging.getLogger(__name__)
+logger.addFilter(SensitiveDataFilter())
+
+# Configure logging format
 logging.basicConfig(
-    level=logging.DEBUG,  # Changed to DEBUG level for more detail
+    level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -24,7 +44,7 @@ app.add_middleware(
 
 # Include routers with detailed logging
 logger.debug("Registering pdf_reader router...")
-app.include_router(pdf_reader.router, prefix="/api")  # Add prefix here
+app.include_router(pdf_reader.router, prefix="/api")
 logger.debug("Registering pdf router...")
 app.include_router(pdf.router, prefix="/api", tags=["pdf"])
 

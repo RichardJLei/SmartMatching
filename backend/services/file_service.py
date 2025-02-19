@@ -4,6 +4,7 @@ from sqlalchemy import select, update
 from database.models import ConfirmationFile, ParsingResult
 from database.database import get_db
 from fastapi import HTTPException
+from uuid import UUID
 
 class FileService:
     """
@@ -88,4 +89,69 @@ class FileService:
                 raise HTTPException(
                     status_code=500,
                     detail=f"Failed to update file: {str(e)}"
+                )
+
+    @staticmethod
+    async def create_parsing_result(
+        file_id: UUID,
+        parsed_data: dict,
+        model_id: str
+    ) -> ParsingResult:
+        """
+        Create a new parsing result with proper versioning.
+        
+        Args:
+            file_id: UUID of the confirmation file
+            parsed_data: Structured data from parsing
+            model_id: Identifier of the model used
+            
+        Returns:
+            ParsingResult: Newly created parsing result
+        """
+        async with get_db() as db:
+            try:
+                # Start transaction
+                async with db.begin():
+                    # Get current latest version if exists
+                    query = select(ParsingResult).where(
+                        ParsingResult.confirmation_file_id == file_id,
+                        ParsingResult.latest == True
+                    )
+                    result = await db.execute(query)
+                    current_latest = result.scalar_one_or_none()
+
+                    # Calculate new version
+                    new_version = 1
+                    if current_latest:
+                        # Update current latest
+                        current_latest.latest = False
+                        await db.flush()
+                        new_version = current_latest.version + 1
+
+                    # Create new parsing result
+                    new_parsing_result = ParsingResult(
+                        confirmation_file_id=file_id,
+                        parsed_data=parsed_data,
+                        version=new_version,
+                        latest=True
+                    )
+                    db.add(new_parsing_result)
+                    await db.flush()
+
+                    # Update file status
+                    file_query = select(ConfirmationFile).where(
+                        ConfirmationFile.file_id == file_id
+                    )
+                    file_result = await db.execute(file_query)
+                    file = file_result.scalar_one()
+                    file.processing_status = 'processed'
+
+                    await db.commit()
+                    return new_parsing_result
+
+            except Exception as e:
+                await db.rollback()
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to create parsing result: {str(e)}"
                 ) 

@@ -185,13 +185,8 @@ class DeepSeekChatService(BaseModelService):
                 detail="Invalid input: text cannot be empty or whitespace only"
             )
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=4, max=10),
-        reraise=True
-    )
     async def _make_model_request(self, messages: list) -> str:
-        """Make request to the model with retry logic"""
+        """Make request to the model"""
         try:
             completion = self.client.chat.completions.create(
                 model=self.model_name,
@@ -219,7 +214,7 @@ class DeepSeekChatService(BaseModelService):
             # Validate input
             self._validate_request(text)
             
-            logger.info("Starting text parsing with DeepSeek model")
+            logger.info("Starting text parsing with model")
             
             # Prepare messages
             system_prompt = f"""
@@ -232,12 +227,10 @@ class DeepSeekChatService(BaseModelService):
                 {"role": "user", "content": text}
             ]
             
-            # Make request with retry logic
+            # Make request without retry
             response_content = await self._make_model_request(messages)
             
-            logger.info(f"Raw response: {response_content[:200]}...")
-            
-            # Try parsing the raw response first
+            # Try parsing the raw response
             try:
                 return self._create_result(json.loads(response_content), ModelProvider.OPENAI)
             except json.JSONDecodeError:
@@ -248,9 +241,7 @@ class DeepSeekChatService(BaseModelService):
         except HTTPException:
             raise
         except Exception as e:
-            logger.error(f"DeepSeek model parsing failed: {str(e)}")
-            logger.error(f"Error type: {type(e)}")
-            logger.error("Error traceback: ", exc_info=True)
+            logger.error(f"Model parsing failed: {str(e)}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Model parsing failed: {str(e)}"
