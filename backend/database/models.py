@@ -1,7 +1,9 @@
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, func, Integer, UniqueConstraint, Boolean, CheckConstraint
+from sqlalchemy import (
+    Column, String, Text, DateTime, ForeignKey, func, Integer, UniqueConstraint,
+    Boolean, CheckConstraint, Index
+)
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.schema import DefaultClause
 from sqlalchemy.sql.expression import text
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -13,7 +15,7 @@ class ConfirmationFile(Base):
     Model for storing confirmation file data and processing status.
     
     Attributes:
-        file_id (UUID): Primary key, unique identifier
+        id (UUID): Primary key, unique identifier
         file_name (str): Original file name
         file_path (str): Local storage path (optional)
         gcs_file_id (str): Google Cloud Storage identifier
@@ -25,27 +27,33 @@ class ConfirmationFile(Base):
     """
     __tablename__ = "confirmation_files"
     
-    file_id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    file_name = Column(String(255))
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    file_name = Column(String(255), nullable=False)
     file_path = Column(Text, nullable=True)
     gcs_file_id = Column(String(255))
     extracted_text = Column(Text)
-    processing_status = Column(String(50), default='pending')
+    processing_status = Column(String(50), default='pending')  # pending, processed, error
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # Relationship to parsing results
     parsing_results = relationship("ParsingResult", back_populates="file", cascade="all, delete")
 
+    # Add unique constraint for file identifiers
+    __table_args__ = (
+        UniqueConstraint('file_name', 'file_path', 'gcs_file_id', name='unique_file_identifier'),
+    )
+
 class ParsingResult(Base):
     """
-    Model for storing parsed results from confirmation files.
+    Model for storing parsed results from confirmation files with versioning.
     
     Attributes:
-        parsing_result_id (UUID): Primary key, unique identifier
-        file_id (UUID): Foreign key to confirmation_files
-        parsed_json (dict): Structured data from parsing
-        matching_unit_ids (JSONB): Array of related matching unit IDs
+        id (UUID): Primary key, unique identifier
+        confirmation_file_id (UUID): Foreign key to confirmation_files
+        parsed_data (dict): Structured data from parsing
+        version (int): Tracks versions of parsing results
+        latest (bool): Marks the latest parsing result
         created_at (datetime): Record creation timestamp
         updated_at (datetime): Last update timestamp
         file (relationship): Related confirmation file
@@ -53,25 +61,23 @@ class ParsingResult(Base):
     """
     __tablename__ = "parsing_results"
     
-    parsing_result_id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    file_id = Column(UUID(as_uuid=True), ForeignKey('confirmation_files.file_id', ondelete='CASCADE'), nullable=False)
-    parsed_json = Column(JSONB)
-    matching_unit_ids = Column(JSONB, default=lambda: [], server_default='[]')
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    confirmation_file_id = Column(UUID(as_uuid=True), ForeignKey('confirmation_files.id', ondelete='CASCADE'), nullable=False)
+    parsed_data = Column(JSONB, nullable=False)
+    version = Column(Integer, nullable=False, default=1)            # Tracks versions of parsing results
+    latest = Column(Boolean, nullable=False, default=True)            # Marks the latest parsing result
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # Relationship to confirmation file
     file = relationship("ConfirmationFile", back_populates="parsing_results")
 
-    # Add relationship to matching units
+    # Relationship to matching units
     matching_units = relationship("MatchingUnit", back_populates="parsing_result", cascade="all, delete")
 
-    # Add constraint to ensure matching_unit_ids is an array
     __table_args__ = (
-        CheckConstraint(
-            "jsonb_typeof(matching_unit_ids) = 'array'",
-            name='check_matching_unit_ids_is_array'
-        ),
+        # Unique index to ensure only one latest parsing result per confirmation file
+        Index('unique_latest_parsing_result', 'confirmation_file_id', unique=True, postgresql_where=text("latest")),
     )
 
 class PartyCode(Base):
@@ -91,7 +97,7 @@ class PartyCode(Base):
     
     party_code_id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     party_code = Column(String(100), nullable=False)
-    msger_name = Column(String(255), nullable=False)
+    msger_name = Column(String(255), nullable=True)
     msger_address = Column(Text)
     party_name = Column(String(255), nullable=False)
     party_role = Column(String(50), nullable=False)  # 'bank' or 'corporate'
@@ -107,54 +113,54 @@ class PartyCode(Base):
 
 class MatchingUnit(Base):
     """
-    Model for storing matching units derived from parsing results.
-    Each record represents one pair of pay & receive legs on the same settlement date.
+    Model for storing extracted transactions from parsing results.
     
     Attributes:
         matching_unit_id (UUID): Primary key
         parsing_result_id (UUID): Foreign key to parsing_results
-        matching_status (str): Status of matching (unmatched/matched)
-        trade_type (str): Type of trade
-        trade_date (date): Date of trade
-        settlement_date (date): Settlement date
-        trading_party_code (str): Code for trading party
-        counterparty_code (str): Code for counter party
-        trade_ref (str): Trade reference number
-        trade_uti (str): Unique trade identifier
-        settlement_rate (str): Settlement rate if applicable
-        transaction_details (JSONB): Pay/receive leg details
+        extracted_transactions (JSONB): Pay/receive leg details
         created_at (datetime): Record creation timestamp
         updated_at (datetime): Last update timestamp
     """
     __tablename__ = "matching_units"
     
     matching_unit_id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    parsing_result_id = Column(UUID(as_uuid=True), ForeignKey('parsing_results.parsing_result_id', ondelete='CASCADE'), nullable=False)
-    matching_status = Column(String(50), nullable=False, default='unmatched')
-    trade_type = Column(String(50))
-    trade_date = Column(DateTime(timezone=True))
-    settlement_date = Column(DateTime(timezone=True))
-    trading_party_code = Column(String(100), nullable=False)
-    counterparty_code = Column(String(100), nullable=False)
-    trade_ref = Column(String(100))
-    trade_uti = Column(String(255))
-    settlement_rate = Column(String(50))
-    transaction_details = Column(JSONB, nullable=False)
+    parsing_result_id = Column(UUID(as_uuid=True), ForeignKey('parsing_results.id', ondelete='CASCADE'), nullable=False)
+    extracted_transactions = Column(JSONB, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
     # Relationship to parsing result
     parsing_result = relationship("ParsingResult", back_populates="matching_units")
 
-    # Add constraints
+    # Relationships to matching relationships
+    matching_relationships_from = relationship(
+        "MatchingRelationship",
+        foreign_keys="[MatchingRelationship.matching_unit_1]",
+        cascade="all, delete",
+        back_populates="matching_unit_1_rel"
+    )
+    matching_relationships_to = relationship(
+        "MatchingRelationship",
+        foreign_keys="[MatchingRelationship.matching_unit_2]",
+        cascade="all, delete",
+        back_populates="matching_unit_2_rel"
+    )
+
+class MatchingRelationship(Base):
+    """
+    Model for storing relationships between matching units.
+    """
+    __tablename__ = "matching_relationships"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    matching_unit_1 = Column(UUID(as_uuid=True), ForeignKey('matching_units.matching_unit_id', ondelete='CASCADE'), nullable=False)
+    matching_unit_2 = Column(UUID(as_uuid=True), ForeignKey('matching_units.matching_unit_id', ondelete='CASCADE'), nullable=False)
+    
     __table_args__ = (
-        UniqueConstraint('trade_uti', name='unique_trade_uti'),
-        CheckConstraint(
-            "transaction_details ? 'pay_leg' AND transaction_details ? 'receive_leg'",
-            name='check_transaction_details_structure'
-        ),
-        CheckConstraint(
-            "matching_status IN ('unmatched', 'matched')",
-            name='check_matching_status'
-        )
-    ) 
+        UniqueConstraint('matching_unit_1', 'matching_unit_2', name='unique_matching_relationship'),
+    )
+    
+    # Relationships back to MatchingUnit
+    matching_unit_1_rel = relationship("MatchingUnit", foreign_keys=[matching_unit_1], back_populates="matching_relationships_from")
+    matching_unit_2_rel = relationship("MatchingUnit", foreign_keys=[matching_unit_2], back_populates="matching_relationships_to") 
