@@ -15,7 +15,7 @@ class ConfirmationFile(Base):
     Model for storing confirmation file data and processing status.
     
     Attributes:
-        id (UUID): Primary key, unique identifier
+        file_id (UUID): Primary key, unique identifier
         file_name (str): Original file name
         file_path (str): Local storage path (optional)
         gcs_file_id (str): Google Cloud Storage identifier
@@ -27,7 +27,7 @@ class ConfirmationFile(Base):
     """
     __tablename__ = "confirmation_files"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    file_id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     file_name = Column(String(255), nullable=False)
     file_path = Column(Text, nullable=True)
     gcs_file_id = Column(String(255))
@@ -49,7 +49,7 @@ class ParsingResult(Base):
     Model for storing parsed results from confirmation files with versioning.
     
     Attributes:
-        id (UUID): Primary key, unique identifier
+        parsing_result_id (UUID): Primary key, unique identifier
         confirmation_file_id (UUID): Foreign key to confirmation_files
         parsed_data (dict): Structured data from parsing
         version (int): Tracks versions of parsing results
@@ -61,8 +61,8 @@ class ParsingResult(Base):
     """
     __tablename__ = "parsing_results"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    confirmation_file_id = Column(UUID(as_uuid=True), ForeignKey('confirmation_files.id', ondelete='CASCADE'), nullable=False)
+    parsing_result_id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    confirmation_file_id = Column(UUID(as_uuid=True), ForeignKey('confirmation_files.file_id', ondelete='CASCADE'), nullable=False)
     parsed_data = Column(JSONB, nullable=False)
     version = Column(Integer, nullable=False, default=1)            # Tracks versions of parsing results
     latest = Column(Boolean, nullable=False, default=True)            # Marks the latest parsing result
@@ -125,7 +125,7 @@ class MatchingUnit(Base):
     __tablename__ = "matching_units"
     
     matching_unit_id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
-    parsing_result_id = Column(UUID(as_uuid=True), ForeignKey('parsing_results.id', ondelete='CASCADE'), nullable=False)
+    parsing_result_id = Column(UUID(as_uuid=True), ForeignKey('parsing_results.parsing_result_id', ondelete='CASCADE'), nullable=False)
     extracted_transactions = Column(JSONB, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -150,10 +150,15 @@ class MatchingUnit(Base):
 class MatchingRelationship(Base):
     """
     Model for storing relationships between matching units.
+    
+    Attributes:
+        relationship_id (UUID): Primary key
+        matching_unit_1 (UUID): Foreign key to first matching unit
+        matching_unit_2 (UUID): Foreign key to second matching unit
     """
     __tablename__ = "matching_relationships"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    relationship_id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     matching_unit_1 = Column(UUID(as_uuid=True), ForeignKey('matching_units.matching_unit_id', ondelete='CASCADE'), nullable=False)
     matching_unit_2 = Column(UUID(as_uuid=True), ForeignKey('matching_units.matching_unit_id', ondelete='CASCADE'), nullable=False)
     

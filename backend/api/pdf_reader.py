@@ -16,9 +16,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
-    prefix="/api",
-    tags=["api"],
-    responses={404: {"description": "Not found"}},
+    tags=["pdf"],
+    responses={404: {"description": "Not found"}}
 )
 
 class LocationType(str, Enum):
@@ -35,7 +34,15 @@ class ModelType(str, Enum):
 class PDFReadRequest(BaseModel):
     """Request model for PDF reading endpoints"""
     file_id: UUID4
-    location: LocationType
+    location: LocationType = LocationType.LOCAL  # Default to local
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "file_id": "123e4567-e89b-12d3-a456-426614174000",
+                "location": "local"
+            }
+        }
 
 class ParseTextRequest(BaseModel):
     """
@@ -59,34 +66,86 @@ async def extract_text(request: PDFReadRequest):
     Returns:
         dict: Contains extracted text and metadata
     """
+    logger.debug(f"Received extract-text request with file_id: {request.file_id}")
+    logger.debug(f"Location type: {request.location}")
+    
     async with get_db() as db:
         # Query using SQLAlchemy ORM
         query = select(ConfirmationFile).where(ConfirmationFile.file_id == request.file_id)
+        logger.debug(f"Executing database query: {query}")
         result = await db.execute(query)
         file_data = result.scalar_one_or_none()
         
+        logger.debug(f"Database query result: {file_data}")
+        
         if not file_data:
+            logger.error(f"File not found with ID: {request.file_id}")
             raise HTTPException(
                 status_code=404,
                 detail=f"File with ID {request.file_id} not found"
             )
         
-        if request.location == LocationType.LOCAL:
-            if not file_data.file_path:
-                raise HTTPException(
-                    status_code=400,
-                    detail="File path not found in database"
+        # Check if text has already been extracted
+        if file_data.processing_status == 'extracted':
+            return {
+                "data": {
+                    "id": str(request.file_id),
+                    "status": "completed",
+                    "success": True,
+                    "message": "Text already extracted",
+                    "metadata": {
+                        "processing_status": file_data.processing_status,
+                        "extracted_text_length": len(file_data.extracted_text or "")
+                    }
+                }
+            }
+        
+        try:
+            # Update status to processing
+            file_data.processing_status = 'processing'
+            await db.commit()
+            
+            if request.location == LocationType.LOCAL:
+                if not file_data.file_path:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="File path not found in database"
+                    )
+                
+                # Extract text using PDFProcessor
+                result = await PDFProcessor.extract_text_from_pdf(
+                    file_id=request.file_id,
+                    file_path=file_data.file_path,
+                    file_name=file_data.file_name
                 )
-            return await PDFProcessor.extract_text_from_pdf(
-                file_id=request.file_id,
-                file_path=file_data.file_path,
-                file_name=file_data.file_name
-            )
-        else:
-            # TODO: Implement cloud storage retrieval
+                
+                if result["data"]["success"]:
+                    # Update processing status to extracted
+                    file_data.processing_status = 'extracted'
+                    await db.commit()
+                else:
+                    # Update status to error if extraction failed
+                    file_data.processing_status = 'error'
+                    await db.commit()
+                
+                return result
+                
+            else:
+                # Update status to error for unsupported location
+                file_data.processing_status = 'error'
+                await db.commit()
+                raise HTTPException(
+                    status_code=501,
+                    detail="Cloud storage integration not implemented yet"
+                )
+                
+        except Exception as e:
+            # Update status to error on exception
+            file_data.processing_status = 'error'
+            await db.commit()
             raise HTTPException(
-                status_code=501,
-                detail="Cloud storage integration not implemented yet"
+                status_code=500,
+                detail=f"Error processing file: {str(e)}"
             )
 
 @router.post("/parse-text")
@@ -195,4 +254,16 @@ async def test_model_connection():
         raise HTTPException(
             status_code=500,
             detail=f"Model connection test failed: {str(e)}"
-        ) 
+        )
+
+@router.get("/test")
+async def test_endpoint():
+    """Test endpoint to verify router configuration"""
+    logger.debug("Test endpoint called")
+    return {"message": "PDF reader router is working"}
+
+@router.get("/")
+async def root():
+    """Root endpoint to verify router is mounted"""
+    logger.debug("Root endpoint called")
+    return {"message": "PDF reader router root endpoint"} 

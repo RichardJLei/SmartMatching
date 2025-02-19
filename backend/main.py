@@ -2,10 +2,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 from api.routes import pdf
+from api import pdf_reader
 
-# Configure logging
+# Configure logging with more detail
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # Changed to DEBUG level for more detail
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
@@ -21,15 +22,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routers
+# Include routers with detailed logging
+logger.debug("Registering pdf_reader router...")
+app.include_router(pdf_reader.router, prefix="/api")  # Add prefix here
+logger.debug("Registering pdf router...")
 app.include_router(pdf.router, prefix="/api", tags=["pdf"])
 
 @app.on_event("startup")
 async def startup_event():
     logger.info("Application starting up...")
-    # Log all registered routes
+    logger.info("Registered routes:")
     for route in app.routes:
-        logger.info(f"Registered route: {route.path}")
+        logger.info(f"Route: {route.path}, Methods: {route.methods}, Name: {route.name}")
 
 @app.on_event("shutdown")
 async def shutdown_event():

@@ -16,16 +16,12 @@ class PDFProcessor:
         # Construct full file path by joining path and filename
         full_file_path = os.path.join(file_path, file_name)
         
-        print(f"Attempting to read file: {full_file_path}")
-        print(f"Full path: {os.path.abspath(full_file_path)}")
-        print(f"File exists: {os.path.exists(full_file_path)}")
-        
         if not os.path.exists(full_file_path):
             raise HTTPException(status_code=404, detail="File not found")
-            
+        
         if not full_file_path.lower().endswith('.pdf'):
-            raise HTTPException(status_code=400, detail="Invalid file format. Only PDF files are supported")
-            
+            raise HTTPException(status_code=400, detail="File must be a PDF")
+        
         try:
             reader = PdfReader(full_file_path)
             text_content = ""
@@ -39,7 +35,6 @@ class PDFProcessor:
                 file_record = result.scalar_one_or_none()
                 if file_record:
                     file_record.extracted_text = text_content
-                    file_record.processing_status = 'extracted'
                     await db.commit()
             
             return {
@@ -50,7 +45,8 @@ class PDFProcessor:
                     "message": f"Successfully extracted text from {file_name}",
                     "metadata": {
                         "page_count": len(reader.pages),
-                        "file_size": os.path.getsize(full_file_path)
+                        "file_size": os.path.getsize(full_file_path),
+                        "text_length": len(text_content)
                     }
                 }
             }
