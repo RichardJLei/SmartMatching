@@ -1,9 +1,9 @@
-import asyncio
-from .database import Base, engine
-from fastapi import HTTPException
 import logging
-from sqlalchemy import text
-from .models import ConfirmationFile, ParsingResult  # Import all models explicitly
+import os
+import sys
+from dotenv import load_dotenv
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -12,68 +12,109 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-async def init_db():
-    """
-    Initialize database with required extensions and tables.
-    
-    This function:
-    1. Creates the pgcrypto extension if not exists
-    2. Drops existing tables (warning: destructive operation)
-    3. Creates new tables based on SQLAlchemy models
-    4. Verifies table creation
-    
-    Raises:
-        HTTPException: If initialization fails
-    """
-    try:
-        async with engine.begin() as conn:
-            # Step 1: Create pgcrypto extension
-            logger.info("Creating pgcrypto extension...")
-            await conn.execute(text('CREATE EXTENSION IF NOT EXISTS "pgcrypto"'))
-            
-            # Step 2: Drop existing tables
-            logger.info("Dropping existing tables...")
-            await conn.run_sync(Base.metadata.drop_all)
-            
-            # Step 3: Create new tables
-            logger.info("Creating new tables...")
-            await conn.run_sync(Base.metadata.create_all)
-            
-            # Step 4: Verify table creation
-            tables_to_verify = ['confirmation_files', 'parsing_results']
-            for table_name in tables_to_verify:
-                result = await conn.execute(
-                    text(f"SELECT table_name FROM information_schema.tables WHERE table_name = '{table_name}'")
-                )
-                if result.scalar():
-                    logger.info(f"Table '{table_name}' created successfully")
-                else:
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"Table '{table_name}' was not created"
-                    )
-                
-            logger.info("Database initialization completed successfully")
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        error_msg = f"Database initialization failed: {str(e)}"
-        logger.error(error_msg)
-        raise HTTPException(status_code=500, detail=error_msg)
+# Add backend directory to Python path for imports
+backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, backend_dir)
 
-def run_init():
-    """
-    Entry point for database initialization.
-    Runs the async initialization function.
-    """
+# Import models after setting up path
+from database.models import Base, PartyCode
+
+# Load environment variables
+load_dotenv(os.path.join(backend_dir, 'config/.env'))
+
+def get_sync_engine():
+    """Create and return synchronous database engine for initialization."""
+    # Convert async DB_URL to sync URL for initialization
+    db_url = os.getenv('DB_URL')
+    if not db_url:
+        raise ValueError("DB_URL environment variable is not set")
+    
+    # Convert asyncpg to psycopg2 for sync operations
+    sync_url = db_url.replace('postgresql+asyncpg://', 'postgresql://')
+    return create_engine(sync_url)
+
+def init_database():
+    """Initialize the database with tables and initial data."""
+    engine = get_sync_engine()
+    
     try:
-        asyncio.run(init_db())
-    except KeyboardInterrupt:
-        logger.info("Database initialization interrupted by user")
+        # Create pgcrypto extension
+        with engine.connect() as conn:
+            conn.execute(text('CREATE EXTENSION IF NOT EXISTS "pgcrypto"'))
+            conn.commit()
+            logger.info("✅ pgcrypto extension created/verified")
+
+        # Create all tables
+        Base.metadata.create_all(engine)
+        logger.info("✅ Database tables created successfully")
+        
+        # Create session
+        Session = sessionmaker(bind=engine)
+        session = Session()
+        
+        try:
+            # Add initial party codes if needed
+            initial_parties = [
+                {
+                    'party_code': 'BANK001',
+                    'party_name': 'Example Bank',
+                    'party_role': 'bank',
+                    'is_active': True
+                },
+                {
+                    'party_code': 'CORP001',
+                    'party_name': 'Example Corporate',
+                    'party_role': 'corporate',
+                    'is_active': True
+                }
+            ]
+            
+            # Check if parties already exist
+            for party_data in initial_parties:
+                existing_party = session.query(PartyCode).filter_by(
+                    party_code=party_data['party_code']
+                ).first()
+                
+                if not existing_party:
+                    party = PartyCode(**party_data)
+                    session.add(party)
+                    logger.info(f"✅ Added initial party: {party_data['party_code']}")
+            
+            session.commit()
+            logger.info("✅ Initial data loaded successfully")
+            
+        finally:
+            session.close()
+        
     except Exception as e:
-        logger.error(f"Failed to run database initialization: {str(e)}")
+        logger.error(f"❌ Error initializing database: {str(e)}")
+        raise
+
+def reset_database():
+    """Reset the database by dropping all tables and recreating them."""
+    engine = get_sync_engine()
+    
+    try:
+        # Drop all tables
+        Base.metadata.drop_all(engine)
+        logger.info("✅ All tables dropped successfully")
+        
+        # Recreate tables and initial data
+        init_database()
+        logger.info("✅ Database reset completed successfully")
+        
+    except Exception as e:
+        logger.error(f"❌ Error resetting database: {str(e)}")
         raise
 
 if __name__ == "__main__":
-    run_init() 
+    try:
+        if len(sys.argv) > 1 and sys.argv[1] == '--reset':
+            logger.info("🔄 Resetting database...")
+            reset_database()
+        else:
+            logger.info("🔄 Initializing database...")
+            init_database()
+    except Exception as e:
+        logger.error(f"Failed to initialize/reset database: {str(e)}")
+        sys.exit(1) 
