@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 from tenacity import retry, stop_after_attempt, wait_exponential
+from google import genai
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ class ModelProvider(str, Enum):
     """Supported AI model providers"""
     NVIDIA = "nvidia"
     OPENAI = "openai"
+    GEMINI = "gemini"  # Add Gemini provider
     # Add more providers as needed
 
 class BaseModelService(ABC):
@@ -276,6 +278,53 @@ class DeepSeekChatService(BaseModelService):
             logger.error(f"JSON cleaning failed: {str(e)}")
             raise ValueError(f"Failed to clean and repair JSON: {str(e)}")
 
+class GeminiService(BaseModelService):
+    """Implementation for Google's Gemini model"""
+    
+    def __init__(self):
+        """Initialize Gemini model client"""
+        super().__init__()
+        self.client = genai.Client(api_key=self.settings.GEMINI_API_KEY)
+        self.model_name = self.settings.GEMINI_MODEL_NAME
+
+    async def parse_text(self, text: str) -> Dict[str, Any]:
+        """Parse text using Gemini model"""
+        try:
+            logger.info("Starting text parsing with Gemini model")
+            
+            # Prepare prompt with text to parse
+            prompt = f"""
+            Please follow these instructions to extract JSON from the FX Confirmation Letter:
+
+            {self.instructions}
+
+            Here's the text to parse:
+            {text}
+
+            Please extract the information and return it in valid JSON format following the specified structure.
+            Only return the JSON object, no additional text.
+            """
+            
+            # Make request to Gemini
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt
+            )
+            
+            # Extract and clean response
+            response_text = response.text
+            cleaned_json = self._extract_json_from_response(response_text)
+            parsed_json = json.loads(cleaned_json)
+            
+            return self._create_result(parsed_json, ModelProvider.GEMINI)
+            
+        except Exception as e:
+            logger.error(f"Gemini model parsing failed: {str(e)}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Model parsing failed: {str(e)}"
+            )
+
 class ModelFactory:
     """Factory for creating model service instances"""
     
@@ -286,6 +335,8 @@ class ModelFactory:
             return NvidiaDeepseekService()
         elif model_type == "deepseek_chat":
             return DeepSeekChatService()
+        elif model_type == "gemini-2.0-flash":
+            return GeminiService()
             
         raise HTTPException(
             status_code=400,

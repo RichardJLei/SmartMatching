@@ -19,6 +19,10 @@ class ModelSettings(BaseSettings):
     DEEPSEEK_BASE_URL: str = "https://api.deepseek.com"
     DEEPSEEK_MODEL_NAME: str = "deepseek-chat"
 
+    # Gemini settings
+    GEMINI_API_KEY: str
+    GEMINI_MODEL_NAME: str = "gemini-2.0-flash"
+
     class Config:
         # Get the absolute path to the .env file
         env_file = str(Path(__file__).parent / ".env")

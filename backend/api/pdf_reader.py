@@ -32,6 +32,7 @@ class ModelType(str, Enum):
     """Enum for supported parsing models"""
     DEEPSEEK_CHAT = "deepseek_chat"
     NVIDIA_DEEPSEEK_R1 = "nvidia_deepseek_r1"
+    GEMINI = "gemini-2.0-flash"
     # Add more models as needed
 
 class PDFReadRequest(BaseModel):
@@ -170,30 +171,55 @@ async def extract_text(request: PDFReadRequest):
 @router.post("/parse-text")
 async def parse_text(request: ParseTextRequest):
     """
-    Parse extracted text from a confirmation file.
+    Parse extracted text from a confirmation file using AI models.
     
     This endpoint:
-    - Validates the file exists and is in TEXT_EXTRACTED status
-    - Uses specified model to parse the extracted text
-    - Updates the file status to TEXT_PARSED
-    - Records the status change in history
+    1. Validates the file exists and is in TEXT_EXTRACTED status
+    2. Uses specified AI model to parse the extracted text
+    3. Updates the file status to TEXT_PARSED
+    4. Records detailed status change history
     
     Args:
         request (ParseTextRequest): Request containing:
             - file_id (UUID): ID of file to parse
-            - model_id (ModelType): Model to use for parsing (default: NVIDIA_DEEPSEEK_R1)
+            - model_id (ModelType): AI model to use for parsing:
+                - "nvidia_deepseek_r1" (default)
+                - "deepseek_chat"
+                - "gemini-2.0-flash"
             
     Returns:
         dict: {
-            "message": "Text parsing completed successfully",
-            "file_id": str,  # UUID as string
-            "status": str,   # New processing status
-            "parsed_data": dict  # Parsed content and metadata
+            "message": str,  # Success message
+            "file_id": str,  # UUID of processed file
+            "status": str,   # New processing status ("TEXT_PARSED")
+            "parsed_data": {
+                "parsed_content": dict,  # Structured data extracted from text
+                "model_info": {
+                    "provider": str,  # AI model provider (nvidia/openai/gemini)
+                    "model": str      # Specific model name used
+                }
+            }
         }
+        
+    Status History:
+        Records in file_status_history table with:
+        - Previous and new status
+        - Complete request parameters
+        - Full API response
+        - Model information
+        - Timestamp
         
     Raises:
         HTTPException (400): If file not found or not in TEXT_EXTRACTED status
         HTTPException (500): If parsing or database operations fail
+        
+    Example:
+        ```python
+        request = {
+            "file_id": "123e4567-e89b-12d3-a456-426614174000",
+            "model_id": "nvidia_deepseek_r1"
+        }
+        ```
     """
     logger.info(f"Starting parse-text for file_id: {request.file_id}")
     
@@ -221,47 +247,49 @@ async def parse_text(request: ParseTextRequest):
             logger.debug(f"Found file: {file.file_id}, status: {file.processing_status}")
             logger.debug("Parsing text with model...")
             
-            # Use parse_with_model instead of parse
+            # Parse text with model and get response
             parsed_data = await TextParser.parse_with_model(
                 text=file.extracted_text,
                 model_id=request.model_id.value
             )
             logger.debug("Text parsing successful")
 
-            logger.debug("Creating status history record...")
-            # Convert UUID and Enum to strings for JSON serialization
+            # Prepare response data
+            response_data = {
+                "message": "Text parsing completed successfully",
+                "file_id": str(file.file_id),
+                "status": ProcessingStatus.TEXT_PARSED.value,
+                "parsed_data": parsed_data
+            }
+
+            # Create status history with detailed additional data
             status_history = FileStatusHistory(
                 file_id=file.file_id,
                 previous_status=ProcessingStatus.TEXT_EXTRACTED,
                 new_status=ProcessingStatus.TEXT_PARSED,
                 trigger_source="api/parse-text",
                 additional_data={
-                    "file_id": str(request.file_id),  # Convert UUID to string
-                    "model_id": request.model_id.value  # Use enum value
+                    "request": {
+                        "file_id": str(request.file_id),
+                        "model_id": request.model_id.value
+                    },
+                    "response": response_data,
+                    "model_info": parsed_data.get("model_info", {}),
+                    "timestamp": datetime.utcnow().isoformat()
                 }
             )
             db.add(status_history)
 
-            logger.debug("Updating file record...")
+            # Update file record
             file.parsed_data = parsed_data
             file.processing_status = ProcessingStatus.TEXT_PARSED
 
-            logger.debug("Committing transaction...")
             await db.commit()
-
-            logger.info("Text parsing completed successfully")
-            return {
-                "message": "Text parsing completed successfully",
-                "file_id": str(file.file_id),  # Convert UUID to string in response
-                "status": ProcessingStatus.TEXT_PARSED.value,
-                "parsed_data": parsed_data  # Added to show parsing result
-            }
+            return response_data
 
         except Exception as e:
             logger.error(f"Error in parse_text: {str(e)}", exc_info=True)
-            logger.error(f"Error type: {type(e)}")
-            logger.error(f"Error args: {e.args}")
-            await db.rollback()  # Explicit rollback
+            await db.rollback()
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error parsing text: {str(e)}"
