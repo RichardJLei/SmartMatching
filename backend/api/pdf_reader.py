@@ -5,12 +5,15 @@ from utils.pdf_processor import PDFProcessor
 from database.database import get_db
 from database.models import ConfirmationFile, FileStatusHistory, ProcessingStatus
 from enum import Enum
-from sqlalchemy import select, update
+from sqlalchemy import select, update, and_
 from datetime import datetime
 from services.file_service import FileService
 from utils.text_parser import TextParser
 from services.model_service import ModelFactory
 import logging
+from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import Depends
 
 # Initialize logger
 logger = logging.getLogger(__name__)
@@ -79,67 +82,7 @@ class ExtractTextResponse(BaseModel):
         }
     )
 
-@router.post(
-    "/extract-text",
-    response_model=ExtractTextResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Extract text from PDF file",
-    description="Extract text content from a PDF file and update its processing status.",
-    responses={
-        200: {
-            "description": "Successfully extracted text from PDF",
-            "content": {
-                "application/json": {
-                    "example": {
-                        "data": {
-                            "id": "123e4567-e89b-12d3-a456-426614174000",
-                            "status": "completed",
-                            "success": True,
-                            "message": "Successfully extracted text from example.pdf",
-                            "metadata": {
-                                "page_count": 5,
-                                "file_size": 1024567,
-                                "text_length": 15000
-                            }
-                        }
-                    }
-                }
-            }
-        },
-        400: {
-            "description": "Bad request",
-            "content": {
-                "application/json": {
-                    "example": {"detail": "File path not found in database"}
-                }
-            }
-        },
-        404: {
-            "description": "File not found or already processed",
-            "content": {
-                "application/json": {
-                    "example": {"detail": "File with ID {file_id} not found or already processed"}
-                }
-            }
-        },
-        500: {
-            "description": "Internal server error",
-            "content": {
-                "application/json": {
-                    "example": {"detail": "Error processing file: {error_message}"}
-                }
-            }
-        },
-        501: {
-            "description": "Not implemented",
-            "content": {
-                "application/json": {
-                    "example": {"detail": "Cloud storage integration not implemented yet"}
-                }
-            }
-        }
-    }
-)
+@router.post("/extract-text")
 async def extract_text(request: PDFReadRequest):
     """
     Extract text content from a PDF file.
@@ -149,19 +92,6 @@ async def extract_text(request: PDFReadRequest):
     - Extracts text content from the PDF
     - Updates the file status to TEXT_EXTRACTED
     - Records the status change in history
-    
-    Args:
-        request: PDFReadRequest containing file_id and location
-        
-    Returns:
-        ExtractTextResponse: Contains extraction results and metadata
-        
-    Raises:
-        HTTPException: 
-            - 404: If file not found or already processed
-            - 400: If file path missing
-            - 500: For processing errors
-            - 501: For unimplemented features
     """
     logger.info(f"Starting extract-text for file_id: {request.file_id}")
     
@@ -202,20 +132,14 @@ async def extract_text(request: PDFReadRequest):
                     # Update the file's extracted text
                     file_data.extracted_text = result["data"]["text_content"]
                     
-                    # Convert request data to JSON-serializable format
-                    request_dict = {
-                        "file_id": str(request.file_id),
-                        "location": request.location.value
-                    }
-                    
-                    # Create status history record with serializable data
+                    # Create status history record
                     status_history = FileStatusHistory(
                         file_id=file_data.file_id,
                         previous_status=file_data.processing_status,
                         new_status=ProcessingStatus.TEXT_EXTRACTED,
                         trigger_source="api/extract-text",
                         additional_data={
-                            "request_params": request_dict,
+                            "request_params": request.dict(),
                             "extraction_metadata": result["data"].get("metadata", {})
                         }
                     )
@@ -223,10 +147,6 @@ async def extract_text(request: PDFReadRequest):
                     
                     # Update file status
                     file_data.processing_status = ProcessingStatus.TEXT_EXTRACTED
-                    
-                    # Single commit for all changes
-                    await db.commit()
-                    logger.info("Successfully completed text extraction")
                     
                     return result
                 else:
@@ -250,96 +170,102 @@ async def extract_text(request: PDFReadRequest):
 @router.post("/parse-text")
 async def parse_text(request: ParseTextRequest):
     """
-    Parse extracted text using specified model.
+    Parse extracted text from a confirmation file.
+    
+    This endpoint:
+    - Validates the file exists and is in TEXT_EXTRACTED status
+    - Uses specified model to parse the extracted text
+    - Updates the file status to TEXT_PARSED
+    - Records the status change in history
     
     Args:
-        request (ParseTextRequest): Contains file_id and model selection
-        
+        request (ParseTextRequest): Request containing:
+            - file_id (UUID): ID of file to parse
+            - model_id (ModelType): Model to use for parsing (default: NVIDIA_DEEPSEEK_R1)
+            
     Returns:
-        dict: Contains parsing results and status following Refine patterns
+        dict: {
+            "message": "Text parsing completed successfully",
+            "file_id": str,  # UUID as string
+            "status": str,   # New processing status
+            "parsed_data": dict  # Parsed content and metadata
+        }
         
     Raises:
-        HTTPException: If parsing fails or file not found
+        HTTPException (400): If file not found or not in TEXT_EXTRACTED status
+        HTTPException (500): If parsing or database operations fail
     """
-    # Get file data and validate
-    file_data = await FileService.get_extracted_file(request.file_id)
+    logger.info(f"Starting parse-text for file_id: {request.file_id}")
     
-    if not file_data:
-        raise HTTPException(status_code=404, detail="File not found")
-    if file_data.processing_status != 'extracted':
-        raise HTTPException(status_code=400, detail="File text not yet extracted")
-    if not file_data.extracted_text:
-        raise HTTPException(status_code=404, detail="No extracted text found")
-
-    try:
-        # Get parsed result using specified model
-        result = await TextParser.parse_with_model(
-            file_data.extracted_text,
-            request.model_id.value
-        )
-        
-        # Log only essential information
-        logger.info(f"Received parsing result for file_id: {request.file_id}")
-        
-        # Ensure result has the expected structure
-        if not isinstance(result, dict):
-            raise ValueError(f"Expected dict result, got {type(result)}")
+    async with get_db() as db:
+        try:
+            logger.debug("Acquiring row lock...")
+            query = select(ConfirmationFile).where(
+                and_(
+                    ConfirmationFile.file_id == request.file_id,
+                    ConfirmationFile.processing_status == ProcessingStatus.TEXT_EXTRACTED
+                )
+            ).with_for_update()
             
-        # Get parsed_content with fallback
-        parsed_content = result.get('parsed_content', result)
-        model_info = result.get('model_info', {
-            'provider': 'unknown', 
-            'model': request.model_id.value
-        })
+            logger.debug("Executing database query...")
+            result = await db.execute(query)
+            file = result.scalar_one_or_none()
 
-        # Create database-ready parsed result
-        db_parsed_result = {
-            "content": parsed_content,
-            "model": {
-                "id": request.model_id.value,
-                "info": model_info
-            },
-            "metadata": {
-                "processing_timestamp": datetime.utcnow().isoformat(),
-                "original_text_length": len(file_data.extracted_text)
-            }
-        }
+            if not file:
+                logger.warning(f"File not found or invalid status: {request.file_id}")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="File not found or not in TEXT_EXTRACTED status"
+                )
 
-        # Update database with parsed result and handle versioning
-        parsing_result = await FileService.create_parsing_result(
-            file_id=request.file_id,
-            parsed_data=db_parsed_result,
-            model_id=request.model_id.value
-        )
+            logger.debug(f"Found file: {file.file_id}, status: {file.processing_status}")
+            logger.debug("Parsing text with model...")
+            
+            # Use parse_with_model instead of parse
+            parsed_data = await TextParser.parse_with_model(
+                text=file.extracted_text,
+                model_id=request.model_id.value
+            )
+            logger.debug("Text parsing successful")
 
-        # Return successful response
-        return {
-            "data": {
-                "id": str(request.file_id),
-                "parsing_result_id": str(parsing_result.parsing_result_id),
-                "status": "completed",
-                "success": True,
-                "model": {
-                    "id": request.model_id.value,
-                    "info": model_info
-                },
-                "result": parsed_content,
-                "metadata": {
-                    "version": parsing_result.version,
-                    "is_latest": parsing_result.latest,
-                    "original_text_length": len(file_data.extracted_text),
-                    "processing_timestamp": datetime.utcnow().isoformat()
+            logger.debug("Creating status history record...")
+            # Convert UUID and Enum to strings for JSON serialization
+            status_history = FileStatusHistory(
+                file_id=file.file_id,
+                previous_status=ProcessingStatus.TEXT_EXTRACTED,
+                new_status=ProcessingStatus.TEXT_PARSED,
+                trigger_source="api/parse-text",
+                additional_data={
+                    "file_id": str(request.file_id),  # Convert UUID to string
+                    "model_id": request.model_id.value  # Use enum value
                 }
-            }
-        }
+            )
+            db.add(status_history)
 
-    except Exception as e:
-        logger.error(f"Error type: {type(e)}")
-        logger.error(f"Error in parse_text: {str(e)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Parsing failed: {str(e)}"
-        )
+            logger.debug("Updating file record...")
+            file.parsed_data = parsed_data
+            file.processing_status = ProcessingStatus.TEXT_PARSED
+
+            logger.debug("Committing transaction...")
+            await db.commit()
+
+            logger.info("Text parsing completed successfully")
+            return {
+                "message": "Text parsing completed successfully",
+                "file_id": str(file.file_id),  # Convert UUID to string in response
+                "status": ProcessingStatus.TEXT_PARSED.value,
+                "parsed_data": parsed_data  # Added to show parsing result
+            }
+
+        except Exception as e:
+            logger.error(f"Error in parse_text: {str(e)}", exc_info=True)
+            logger.error(f"Error type: {type(e)}")
+            logger.error(f"Error args: {e.args}")
+            await db.rollback()  # Explicit rollback
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error parsing text: {str(e)}"
+            )
 
 @router.get("/test-model-connection")
 async def test_model_connection():
