@@ -14,6 +14,7 @@ class ExtractMatchingUnitService:
     async def extract_matching_units(self, parsing_result_id: UUID) -> List[UUID]:
         """
         Extract matching units from parsed content and save to matching_units table.
+        Only processes the latest parsing result.
         Returns list of created matching unit IDs.
         """
         logger.info(f"Starting extraction for parsing_result_id: {parsing_result_id}")
@@ -22,20 +23,22 @@ class ExtractMatchingUnitService:
             try:
                 # Get parsing result using async query
                 query = select(ParsingResult).where(
-                    ParsingResult.parsing_result_id == parsing_result_id
+                    ParsingResult.parsing_result_id == parsing_result_id,
+                    ParsingResult.latest == True  # Only process latest version
                 )
                 result = await db.execute(query)
                 parsing_result = result.scalar_one_or_none()
                 
-                if not parsing_result or not parsing_result.parsed_json:
-                    logger.error(f"Parsing result not found or empty for id: {parsing_result_id}")
-                    raise ValueError("Parsing result not found or empty")
+                if not parsing_result:
+                    logger.error(f"Latest parsing result not found for id: {parsing_result_id}")
+                    raise ValueError("Latest parsing result not found")
 
-                # Log the full parsed_json structure for debugging
-                logger.debug(f"Full parsed_json structure: {parsing_result.parsed_json}")
+                if not parsing_result.parsed_data:
+                    logger.error(f"Parsed data is empty for parsing result: {parsing_result_id}")
+                    raise ValueError("Parsed data is empty")
 
-                # Navigate through the nested structure
-                parsed_content = parsing_result.parsed_json
+                # Navigate through the nested structure to get parsed content
+                parsed_content = parsing_result.parsed_data
                 if 'content' in parsed_content:
                     parsed_content = parsed_content['content']
                 if 'parsed_result' in parsed_content:
@@ -73,18 +76,17 @@ class ExtractMatchingUnitService:
                         # Create matching unit record
                         matching_unit = MatchingUnit(
                             parsing_result_id=parsing_result_id,
-                            matching_status='unmatched',
-                            trade_type=parsed_content.get('TradeType'),
-                            trade_date=datetime.strptime(pay_leg['TradeDate'], '%Y-%m-%d'),
-                            settlement_date=datetime.strptime(settle_date, '%Y-%m-%d'),
-                            trading_party_code=parsed_content.get('TradingParty'),
-                            counterparty_code=parsed_content.get('CounterParty'),
-                            trade_ref=parsed_content.get('TradeRef'),
-                            trade_uti=parsed_content.get('TradeUTI'),
-                            settlement_rate=parsed_content.get('SettlementRate'),
-                            transaction_details={
+                            extracted_transactions={
                                 'pay_leg': pay_leg,
-                                'receive_leg': receive_leg
+                                'receive_leg': receive_leg,
+                                'trade_type': parsed_content.get('TradeType'),
+                                'trade_date': pay_leg['TradeDate'],
+                                'settlement_date': settle_date,
+                                'trading_party_code': parsed_content.get('TradingParty'),
+                                'counterparty_code': parsed_content.get('CounterParty'),
+                                'trade_ref': parsed_content.get('TradeRef'),
+                                'trade_uti': parsed_content.get('TradeUTI'),
+                                'settlement_rate': parsed_content.get('SettlementRate')
                             }
                         )
                         
@@ -92,12 +94,6 @@ class ExtractMatchingUnitService:
                         await db.flush()
                         matching_unit_ids.append(matching_unit.matching_unit_id)
 
-                # Convert UUIDs to strings for JSON storage
-                matching_unit_ids_str = [str(uid) for uid in matching_unit_ids]
-                
-                # Update parsing result with matching unit IDs
-                parsing_result.matching_unit_ids = matching_unit_ids_str
-                
                 await db.commit()
                 logger.info(f"Successfully created {len(matching_unit_ids)} matching units")
                 return matching_unit_ids

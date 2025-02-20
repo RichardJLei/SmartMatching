@@ -22,6 +22,7 @@ async def extract_matching_units(
 ):
     """
     Extract matching units from parsed content and save to matching_units table.
+    Only processes the latest parsing result.
     """
     logger.info(f"Received request for parsing_result_id: {request.parsing_result_id}")
     try:

@@ -1,6 +1,4 @@
-select * from parsing_results
-where parsing_result_id = 'd3427384-678d-45f9-b0f7-068d37309ffe'
-order by updated_at desc 
+
 
 select * from confirmation_files
 
