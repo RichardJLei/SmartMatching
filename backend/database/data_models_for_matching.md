@@ -2,59 +2,122 @@
 
 This project uses a PostgreSQL schema that supports the matching process via four main tables:
 
-1. **Confirmation Files**  
-   - Stores each file upload with basic metadata.
-   - **Key Fields:**  
-     - `id`: Primary key.  
-     - `file_name`: Name of the file.  
-     - `file_path`: Local storage path (optional)  
-     - `gcs_file_id`: Google Cloud Storage identifier  
-     - `processing_status`: Indicates if the file is pending, processed, or in error.  
-     - `created_at`: Timestamp when the file was added.
-   - **Constraints:**  
-     - Unique combination of file_name, file_path, and gcs_file_id prevents duplicate file entries
+All API calls have to provide the allowed transitions in processing_status in confirmation_files table and the new status.
+All API calls have to check the processing_status before performing the database update action.
 
-2. **Parsing Results**  
-   - Contains parsed data (JSONB) from a confirmation file.  
-   - Supports versioning:  
-     - `version`: Tracks the version of the parsing result (default is 1).  
-     - `latest`: A boolean flag marking the most recent parsing result for a file.
-   - A unique index ensures only one parsing result per confirmation file is marked as latest.
-   - **Workflow:**  
-     - When updating parsing for a file, mark the previous result as non-latest and insert a new record with an increased version.
+1. **Confirmation Files**  
+   - Stores each file upload with metadata and parsed content
+   - **Key Fields:**  
+     - `file_id`: Primary key  
+     - `file_name`: Name of the file  
+     - `file_path`: Local storage path (optional)  
+     - `gcs_file_id`: Google Cloud Storage identifier
+     - `extracted_text`: Raw text content from PDF
+     - `parsed_data`: JSONB field with structured data from parsing
+     - `processing_status`: Current processing state:
+       - `Not_Processed`: Initial state
+       - `TEXT_EXTRACTED`: Text extraction completed
+       - `TEXT_PARSED`: Parsing completed
+       - `UNITS_CREATED`: Matching units generated
+       - `PARTIALLY_MATCHED`: Some units matched
+       - `FULLY_MATCHED`: All units matched
+       - `ERROR`: Processing error
+     - `total_matching_units`: Count of matching units (updated when units are created)
+     - `matched_units_count`: Count of matched units (updated when matches are made)
+     - `created_at`: Record creation timestamp
+     - `updated_at`: Last modification timestamp
+   - **Constraints:**  
+     - UniqueConstraint('file_name', 'file_path', 'gcs_file_id', name='unique_file_identifier')
+   - **Status Management:**
+     - Status transitions must follow the defined sequence
+     - Each status change must be recorded in file_status_history
+     - `UNITS_CREATED` status prevents duplicate unit creation
+     - Unit counts must be updated atomically with related operations
+
+2. **File Status History**
+   - Tracks all state transitions and data changes
+   - **Key Fields:**
+     - `history_id`: Primary key
+     - `file_id`: Foreign key to confirmation_files
+     - `previous_status`: Previous workflow status
+     - `new_status`: New workflow status
+     - `transition_time`: When the change occurred
+     - `trigger_source`: What caused the change (API endpoint, background job, etc)
+     - `additional_data`: JSONB field storing:
+       - Previous and new parsed_data when parsing changes
+       - Matching unit counts
+       - Error details
+       - Other relevant metadata
+   - **Constraints:**
+     - Foreign key (file_id) REFERENCES confirmation_files ON DELETE CASCADE
+   - **Usage:**
+     - Every status change must create a history record
+     - All significant data changes should be recorded
+     - Provides audit trail for troubleshooting
 
 3. **Matching Units**  
-   - Stores the extracted transactions used for matching.
-   - **Key Field:**  
-     - `extracted_transactions`: A JSONB field storing transaction data.
-   - Each matching unit is linked to a parsing result (typically the latest from a given file).
+   - Individual units for matching
+   - **Key Fields:**
+     - `matching_unit_id`: Primary key
+     - `file_id`: Foreign key to confirmation_files
+     - `extracted_transactions`: JSONB field storing transaction data
+     - `is_matched`: Boolean indicating if unit is matched
+     - `created_at`: Record creation timestamp
+     - `updated_at`: Last modification timestamp
+   - **Constraints:**
+     - Foreign key (file_id) REFERENCES confirmation_files ON DELETE CASCADE
+   - **Usage:**
+     - Can only be created when file status is 'TEXT_PARSED'
+     - Creation must update file's total_matching_units
+     - Matching must update file's matched_units_count
 
 4. **Matching Relationships**  
-   - Maintains the links (relationships) between extracted matching units.
-   - **Key Fields:**  
-     - `matching_unit_1` and `matching_unit_2`: Foreign keys to matching units.
-   - A unique constraint prevents cyclic or duplicate relationships between the same pair of units.
+   - Links between matched units
+   - **Key Fields:**
+     - `relationship_id`: Primary key
+     - `matching_unit_1`: Foreign key to first matching unit
+     - `matching_unit_2`: Foreign key to second matching unit
+     - `created_at`: Record creation timestamp
+   - **Constraints:**
+     - UniqueConstraint('matching_unit_1', 'matching_unit_2', name='unique_matching_relationship')
+   - **Usage:**
+     - Creating/deleting relationships must update unit is_matched status
+     - Must update file's matched_units_count
+     - Should trigger file status update if all units matched
 
-## Common Operations
+## Workflow Enforcement
 
-1. **Insert a New Confirmation File:**  
-   - Use an INSERT statement to add a new record to the confirmation_files table, then use its `id` for subsequent operations.
+1. **Status Transitions:**
+   ```sql
+   -- Example of safe status update with history
+   BEGIN;
+     -- Lock the file row
+     SELECT * FROM confirmation_files 
+     WHERE file_id = ? FOR UPDATE;
+     
+     -- Insert history record
+     INSERT INTO file_status_history (...) VALUES (...);
+     
+     -- Update status and counts
+     UPDATE confirmation_files 
+     SET processing_status = ?, 
+         total_matching_units = ?,
+         matched_units_count = ?,
+         updated_at = CURRENT_TIMESTAMP
+     WHERE file_id = ?;
+   COMMIT;
+   ```
 
-2. **Insert a New Parsing Result:**  
-   - Update any previous parsing result for the file (set `latest` to FALSE) and insert a new record with the current parsed data, incrementing the version and setting `latest` to TRUE.
+2. **One-to-Many Relationships:**
+   - One confirmation file to many matching units
+   - One matching unit to many relationships
+   - One relationship to two matching units
 
-3. **Insert a New Matching Unit:**  
-   - With the latest parsing result ID, insert a matching unit containing the extracted transactions.
-   - In our models, the foreign keys for MatchingRelationship are defined with ondelete='CASCADE'.
-        - This means that if a matching unit is deleted, any relationship entries referring to it will be automatically removed from the database.
-        - This approach ensures that orphaned references do not remain, but it does not stop the deletion of a matching unit that still has relationships.
+3. **Cascading Updates - normal:**
+   - CANNOT delete a file if it has matching units
+   - CANNOT delete a matching unit if it has relationships
 
-4. **Create a Matching Relationship:**  
-   - Insert a new record into matching_relationships linking two matching units.
-   - The unique constraint ensures that duplicate relationships are not created.
+4. **Safe delete:**
+   - Deleting is not allowed if there are related records in other tables.
 
-5. **Safe Deletion:**  
-   - Before a matching unit is deleted, ensure that its relationships are removed.
-   - The business logic (or triggers in the database) prevents accidental deletion if references exist.
-
-This structure maintains non-cyclic dependencies and efficient updates by marking the latest parsing results, while also ensuring safe deletions and clean matching relationships.
+ 

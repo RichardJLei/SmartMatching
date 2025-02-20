@@ -1,10 +1,10 @@
 
 
-select * from confirmation_files
+select processing_status,* from confirmation_files
 
 select * from matching_units
 
-select * from parsing_results
+select latest,* from parsing_results
 
 --delete from parsing_results
 
