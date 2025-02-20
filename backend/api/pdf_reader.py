@@ -1,9 +1,9 @@
-from fastapi import APIRouter, HTTPException
-from typing import Optional
-from pydantic import BaseModel, UUID4
+from fastapi import APIRouter, HTTPException, status
+from typing import Optional, Dict, Any
+from pydantic import BaseModel, UUID4, Field
 from utils.pdf_processor import PDFProcessor
 from database.database import get_db
-from database.models import ConfirmationFile
+from database.models import ConfirmationFile, FileStatusHistory, ProcessingStatus
 from enum import Enum
 from sqlalchemy import select, update
 from datetime import datetime
@@ -33,8 +33,14 @@ class ModelType(str, Enum):
 
 class PDFReadRequest(BaseModel):
     """Request model for PDF reading endpoints"""
-    file_id: UUID4
-    location: LocationType = LocationType.LOCAL  # Default to local
+    file_id: UUID4 = Field(
+        ...,
+        description="Unique identifier of the file to process"
+    )
+    location: LocationType = Field(
+        default=LocationType.LOCAL,
+        description="Storage location of the file (local or cloud)"
+    )
 
     class Config:
         json_schema_extra = {
@@ -55,55 +61,128 @@ class ParseTextRequest(BaseModel):
     file_id: UUID4
     model_id: ModelType = ModelType.NVIDIA_DEEPSEEK_R1
 
-@router.post("/extract-text")
+class ExtractTextResponse(BaseModel):
+    """Response model for text extraction"""
+    data: Dict[str, Any] = Field(
+        ...,
+        description="Response data containing extraction results",
+        example={
+            "id": "123e4567-e89b-12d3-a456-426614174000",
+            "status": "completed",
+            "success": True,
+            "message": "Successfully extracted text from example.pdf",
+            "metadata": {
+                "page_count": 5,
+                "file_size": 1024567,
+                "text_length": 15000
+            }
+        }
+    )
+
+@router.post(
+    "/extract-text",
+    response_model=ExtractTextResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Extract text from PDF file",
+    description="Extract text content from a PDF file and update its processing status.",
+    responses={
+        200: {
+            "description": "Successfully extracted text from PDF",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "data": {
+                            "id": "123e4567-e89b-12d3-a456-426614174000",
+                            "status": "completed",
+                            "success": True,
+                            "message": "Successfully extracted text from example.pdf",
+                            "metadata": {
+                                "page_count": 5,
+                                "file_size": 1024567,
+                                "text_length": 15000
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        400: {
+            "description": "Bad request",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "File path not found in database"}
+                }
+            }
+        },
+        404: {
+            "description": "File not found or already processed",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "File with ID {file_id} not found or already processed"}
+                }
+            }
+        },
+        500: {
+            "description": "Internal server error",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Error processing file: {error_message}"}
+                }
+            }
+        },
+        501: {
+            "description": "Not implemented",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Cloud storage integration not implemented yet"}
+                }
+            }
+        }
+    }
+)
 async def extract_text(request: PDFReadRequest):
     """
     Extract text content from a PDF file.
     
+    This endpoint:
+    - Validates the file exists and is in correct status (Not_Processed)
+    - Extracts text content from the PDF
+    - Updates the file status to TEXT_EXTRACTED
+    - Records the status change in history
+    
     Args:
-        request (PDFReadRequest): Request containing file_id and location
+        request: PDFReadRequest containing file_id and location
         
     Returns:
-        dict: Contains extracted text and metadata
+        ExtractTextResponse: Contains extraction results and metadata
+        
+    Raises:
+        HTTPException: 
+            - 404: If file not found or already processed
+            - 400: If file path missing
+            - 500: For processing errors
+            - 501: For unimplemented features
     """
-    logger.debug(f"Received extract-text request with file_id: {request.file_id}")
-    logger.debug(f"Location type: {request.location}")
+    logger.info(f"Starting extract-text for file_id: {request.file_id}")
     
     async with get_db() as db:
-        # Query using SQLAlchemy ORM
-        query = select(ConfirmationFile).where(ConfirmationFile.file_id == request.file_id)
-        logger.debug(f"Executing database query: {query}")
-        result = await db.execute(query)
-        file_data = result.scalar_one_or_none()
-        
-        logger.debug(f"Database query result: {file_data}")
-        
-        if not file_data:
-            logger.error(f"File not found with ID: {request.file_id}")
-            raise HTTPException(
-                status_code=404,
-                detail=f"File with ID {request.file_id} not found"
-            )
-        
-        # Check if text has already been extracted
-        if file_data.processing_status == 'extracted':
-            return {
-                "data": {
-                    "id": str(request.file_id),
-                    "status": "completed",
-                    "success": True,
-                    "message": "Text already extracted",
-                    "metadata": {
-                        "processing_status": file_data.processing_status,
-                        "extracted_text_length": len(file_data.extracted_text or "")
-                    }
-                }
-            }
-        
         try:
-            # Update status to processing
-            file_data.processing_status = 'processing'
-            await db.commit()
+            logger.debug("Acquiring row lock...")
+            query = select(ConfirmationFile).where(
+                ConfirmationFile.file_id == request.file_id,
+                (ConfirmationFile.processing_status.is_(None)) | 
+                (ConfirmationFile.processing_status == ProcessingStatus.Not_Processed)
+            ).with_for_update()
+            
+            result = await db.execute(query)
+            file_data = result.scalar_one_or_none()
+            
+            if not file_data:
+                logger.warning(f"File not found or invalid status: {request.file_id}")
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"File with ID {request.file_id} not found or already processed"
+                )
             
             if request.location == LocationType.LOCAL:
                 if not file_data.file_path:
@@ -112,7 +191,7 @@ async def extract_text(request: PDFReadRequest):
                         detail="File path not found in database"
                     )
                 
-                # Extract text using PDFProcessor
+                logger.debug("Calling PDFProcessor.extract_text_from_pdf...")
                 result = await PDFProcessor.extract_text_from_pdf(
                     file_id=request.file_id,
                     file_path=file_data.file_path,
@@ -120,29 +199,49 @@ async def extract_text(request: PDFReadRequest):
                 )
                 
                 if result["data"]["success"]:
-                    # Update processing status to extracted
-                    file_data.processing_status = 'extracted'
+                    # Update the file's extracted text
+                    file_data.extracted_text = result["data"]["text_content"]
+                    
+                    # Convert request data to JSON-serializable format
+                    request_dict = {
+                        "file_id": str(request.file_id),
+                        "location": request.location.value
+                    }
+                    
+                    # Create status history record with serializable data
+                    status_history = FileStatusHistory(
+                        file_id=file_data.file_id,
+                        previous_status=file_data.processing_status,
+                        new_status=ProcessingStatus.TEXT_EXTRACTED,
+                        trigger_source="api/extract-text",
+                        additional_data={
+                            "request_params": request_dict,
+                            "extraction_metadata": result["data"].get("metadata", {})
+                        }
+                    )
+                    db.add(status_history)
+                    
+                    # Update file status
+                    file_data.processing_status = ProcessingStatus.TEXT_EXTRACTED
+                    
+                    # Single commit for all changes
                     await db.commit()
+                    logger.info("Successfully completed text extraction")
+                    
+                    return result
                 else:
-                    # Update status to error if extraction failed
-                    file_data.processing_status = 'error'
-                    await db.commit()
-                
-                return result
-                
+                    raise HTTPException(
+                        status_code=500,
+                        detail=result["data"].get("error", "Unknown error during extraction")
+                    )
             else:
-                # Update status to error for unsupported location
-                file_data.processing_status = 'error'
-                await db.commit()
                 raise HTTPException(
                     status_code=501,
                     detail="Cloud storage integration not implemented yet"
                 )
                 
         except Exception as e:
-            # Update status to error on exception
-            file_data.processing_status = 'error'
-            await db.commit()
+            logger.error(f"Error in extract_text: {str(e)}", exc_info=True)
             raise HTTPException(
                 status_code=500,
                 detail=f"Error processing file: {str(e)}"

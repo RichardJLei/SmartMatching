@@ -2,6 +2,8 @@
 
 select processing_status,* from confirmation_files
 
+select * from file_status_history
+
 select * from matching_units
 
 select latest,* from parsing_results

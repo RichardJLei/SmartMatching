@@ -167,3 +167,30 @@ class PartyCode(Base):
         UniqueConstraint('party_code', name='unique_party_code'),
         UniqueConstraint('msger_name', 'party_name', 'party_role', name='unique_party_combination'),
     ) 
+
+
+# temporary model for testing. to be removed after testing
+class ParsingResult(Base):
+    """
+    Model for storing parsed results from confirmation files with versioning.
+    
+    Attributes:
+        parsing_result_id (UUID): Primary key, unique identifier
+        confirmation_file_id (UUID): Foreign key to confirmation_files
+        parsed_data (dict): Structured data from parsing
+        version (int): Tracks versions of parsing results
+        latest (bool): Marks the latest parsing result
+        created_at (datetime): Record creation timestamp
+        updated_at (datetime): Last update timestamp
+        file (relationship): Related confirmation file
+        matching_units (relationship): Related matching units
+    """
+    __tablename__ = "parsing_results"
+    
+    parsing_result_id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
+    confirmation_file_id = Column(UUID(as_uuid=True), ForeignKey('confirmation_files.file_id', ondelete='CASCADE'), nullable=False)
+    parsed_data = Column(JSONB, nullable=False)
+    version = Column(Integer, nullable=False, default=1)            # Tracks versions of parsing results
+    latest = Column(Boolean, nullable=False, default=True)            # Marks the latest parsing result
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

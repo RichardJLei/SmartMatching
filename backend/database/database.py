@@ -22,15 +22,15 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     Raises:
         HTTPException: If database operations fail
     """
-    async with async_session() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception as e:
-            await session.rollback()
-            raise HTTPException(
-                status_code=500,
-                detail=f"Database operation failed: {str(e)}"
-            )
-        finally:
-            await session.close() 
+    session = async_session()
+    try:
+        yield session
+        await session.commit()
+    except Exception as e:
+        await session.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database operation failed: {str(e)}"
+        )
+    finally:
+        await session.close() 
