@@ -57,13 +57,17 @@ def init_database():
             initial_parties = [
                 {
                     'party_code': 'BANK001',
-                    'party_name': 'Example Bank',
+                    'msger_name': 'BANK OF EXAMPLE',
+                    'msger_address': '123 Banking St, Finance City, FC 12345',
+                    'party_name': 'Example Bank Ltd',
                     'party_role': 'bank',
                     'is_active': True
                 },
                 {
                     'party_code': 'CORP001',
-                    'party_name': 'Example Corporate',
+                    'msger_name': 'EXAMPLE CORP',
+                    'msger_address': '456 Corporate Ave, Business City, BC 67890',
+                    'party_name': 'Example Corporate Inc',
                     'party_role': 'corporate',
                     'is_active': True
                 }

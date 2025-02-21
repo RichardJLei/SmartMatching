@@ -1,6 +1,6 @@
 from sqlalchemy import (
     Column, String, Text, DateTime, ForeignKey, func, Integer, UniqueConstraint,
-    Boolean, CheckConstraint, Index, Enum
+    Boolean, CheckConstraint, Index, Enum, Float, Date
 )
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.ext.declarative import declarative_base
@@ -85,8 +85,15 @@ class MatchingUnit(Base):
     Attributes:
         matching_unit_id (UUID): Primary key
         file_id (UUID): Foreign key to confirmation_files
-        extracted_transactions (JSONB): Pay/receive leg details
         is_matched (bool): Marks if the unit is matched
+        trade_type (str): Type of trade from parsed data
+        trade_date (date): Date of trade
+        settlement_date (date): Settlement date
+        trading_party_code (str): Code for trading party
+        counterparty_code (str): Code for counter party
+        trade_ref (str): Trade reference number
+        settlement_rate (float): Settlement rate if applicable
+        transaction_details (JSONB): Pay/receive leg details
         created_at (datetime): Record creation timestamp
         updated_at (datetime): Last update timestamp
     """
@@ -94,8 +101,15 @@ class MatchingUnit(Base):
     
     matching_unit_id = Column(UUID(as_uuid=True), primary_key=True, server_default=text("gen_random_uuid()"))
     file_id = Column(UUID(as_uuid=True), ForeignKey('confirmation_files.file_id', ondelete='CASCADE'), nullable=False)
-    extracted_transactions = Column(JSONB, nullable=False)
     is_matched = Column(Boolean, default=False)
+    trade_type = Column(String(100))
+    trade_date = Column(Date)
+    settlement_date = Column(Date)
+    trading_party_code = Column(String(100))
+    counterparty_code = Column(String(100))
+    trade_ref = Column(String(255))
+    settlement_rate = Column(Float)
+    transaction_details = Column(JSONB)  # For storing pay/receive leg details
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     

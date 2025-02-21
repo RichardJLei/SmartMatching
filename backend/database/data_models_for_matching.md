@@ -60,10 +60,23 @@ All API calls have to check the processing_status before performing the database
    - **Key Fields:**
      - `matching_unit_id`: Primary key
      - `file_id`: Foreign key to confirmation_files
-     - `extracted_transactions`: JSONB field storing transaction data
      - `is_matched`: Boolean indicating if unit is matched
      - `created_at`: Record creation timestamp
      - `updated_at`: Last modification timestamp
+     - `trade_type`: Type of trade, from parsed_data
+     - `trade_date`: Date of trade, from parsed_data
+     - `settlement_date`: Settlement date, from parsed_data
+     - `trading_party_code`: Code for trading party, from party_codes
+     - `counterparty_code`: Code for counter party, from party_codes
+     - `trade_ref`: Trade reference number, from parsed_data
+     - `settlement_rate`: Settlement rate if applicable, from parsed_data
+     - `transaction_details`: JSONB field storing Pay/receive leg details, from parsed_data
+        - `pay-leg`: pay leg details
+          - `amount`: amount
+          - `currency`: currency
+        - `receive-leg`: receive leg details
+          - `amount`: amount
+          - `currency`: currency
    - **Constraints:**
      - Foreign key (file_id) REFERENCES confirmation_files ON DELETE CASCADE
    - **Usage:**
@@ -84,6 +97,19 @@ All API calls have to check the processing_status before performing the database
      - Creating/deleting relationships must update unit is_matched status
      - Must update file's matched_units_count
      - Should trigger file status update if all units matched
+
+5. **Party Codes**  
+    - Unique code for trading and counterpart parties   
+    **Key Fields:**:
+        party_code_id (UUID): Primary key
+        party_code (str): code for the party, cannot be null
+        msger_name (str): Name from MsgSender/MsgReceiver, from parsed_data
+        msger_address (str): Address from MsgSender/MsgReceiver, from parsed_data
+        party_name (str): Name from TradingParty/CounterParty, from parsed_data
+        party_role (str): Role of the party (bank/corporate), can be null
+        is_active (bool): Status flag, default is True
+   - **Constraints:**
+       - UniqueConstraint('msger_name', 'msger_address','party_name', 'party_role', name='unique_party_combination')
 
 ## Workflow Enforcement
 
