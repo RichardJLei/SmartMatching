@@ -5,7 +5,7 @@ from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
-from database.models import ParsingResult, MatchingUnit, ConfirmationFile, FileStatusHistory, ProcessingStatus
+from database.models import ConfirmationFile, MatchingUnit, FileStatusHistory, ProcessingStatus
 from database.database import get_db
 
 logger = logging.getLogger(__name__)
