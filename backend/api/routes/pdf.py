@@ -1,5 +1,5 @@
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
 from uuid import UUID
 from pydantic import BaseModel
@@ -11,20 +11,45 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 class ExtractMatchingUnitsRequest(BaseModel):
+    """Request model for extracting matching units"""
     file_id: UUID
 
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "file_id": "123e4567-e89b-12d3-a456-426614174000"
+            }
+        }
+
 class ExtractMatchingUnitsResponse(BaseModel):
+    """Response model for matching units extraction"""
     matching_unit_ids: List[UUID]
     message: str
 
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "matching_unit_ids": ["123e4567-e89b-12d3-a456-426614174000"],
+                "message": "Successfully created 1 matching units"
+            }
+        }
+
 @router.post("/extract-matching-units-from-parsed-content", 
-            response_model=ExtractMatchingUnitsResponse)
+            response_model=ExtractMatchingUnitsResponse,
+            status_code=status.HTTP_200_OK,
+            tags=["PDF Processing"])
 async def extract_matching_units(request: ExtractMatchingUnitsRequest):
     """
     Extract matching units from a confirmation file's parsed content.
 
     This endpoint processes a confirmation file and creates matching units from its transactions.
     Only processes files that are in TEXT_PARSED status.
+    
+    The process includes:
+    1. Validating the file exists and is in TEXT_PARSED status
+    2. Looking up party codes for both trading party and counter party
+    3. Creating matching units for each settlement date's transactions
+    4. Updating file status to UNITS_CREATED
     
     Parameters:
     -----------
@@ -46,6 +71,8 @@ async def extract_matching_units(request: ExtractMatchingUnitsRequest):
         - When file is not in TEXT_PARSED status
         - When no parsed data is found
         - When no transactions are found in parsed content
+        - When trading party code cannot be found in party_codes table
+        - When counter party code cannot be found in party_codes table
     HTTPException (500)
         - When database operations fail
         - When unexpected errors occur
@@ -55,6 +82,7 @@ async def extract_matching_units(request: ExtractMatchingUnitsRequest):
     - Creates new matching_units records
     - Updates confirmation_files status to UNITS_CREATED
     - Creates file_status_history record
+    - Updates total_matching_units count in confirmation_files
     """
     logger.info(f"Received request for file_id: {request.file_id}")
     try:

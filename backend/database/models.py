@@ -178,6 +178,6 @@ class PartyCode(Base):
 
     # Unique constraints
     __table_args__ = (
-        UniqueConstraint('party_code', name='unique_party_code'),
-        UniqueConstraint('msger_name', 'party_name', 'party_role', name='unique_party_combination'),
+        UniqueConstraint('msger_name', 'msger_address', 'party_name', 'party_role', 
+                        name='unique_party_combination'),
     ) 
