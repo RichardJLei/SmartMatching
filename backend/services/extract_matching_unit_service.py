@@ -1,27 +1,30 @@
-import logging
 from typing import List
 from uuid import UUID
+import logging
+from fastapi import HTTPException
 from sqlalchemy import select, and_
-from sqlalchemy.ext.asyncio import AsyncSession
-from datetime import datetime
-
-from database.models import ParsingResult, MatchingUnit, ConfirmationFile, FileStatusHistory, ProcessingStatus
 from database.database import get_db
+from database.models import MatchingUnit, ConfirmationFile, FileStatusHistory, ProcessingStatus
 
 logger = logging.getLogger(__name__)
 
 class ExtractMatchingUnitService:
     async def extract_matching_units(self, file_id: UUID) -> List[UUID]:
         """
-        Extract matching units from parsed content and save to matching_units table.
-        Only processes files in TEXT_PARSED status.
-        Returns list of created matching unit IDs.
-        """
-        logger.info(f"Starting matching unit extraction for file_id: {file_id}")
+        Extract matching units from a confirmation file's parsed content.
         
+        Args:
+            file_id (UUID): ID of the confirmation file to process
+            
+        Returns:
+            List[UUID]: List of created matching unit IDs
+            
+        Raises:
+            HTTPException: If file not found or processing fails
+        """
         async with get_db() as db:
             try:
-                # Lock the file row and verify status
+                # Get file with lock
                 query = select(ConfirmationFile).where(
                     and_(
                         ConfirmationFile.file_id == file_id,
@@ -33,61 +36,27 @@ class ExtractMatchingUnitService:
                 file = result.scalar_one_or_none()
                 
                 if not file:
-                    logger.error(f"File not found or not in TEXT_PARSED status: {file_id}")
-                    raise ValueError("File not found or not in correct status")
-
+                    raise ValueError(f"File {file_id} not found or not in TEXT_PARSED status")
+                
                 if not file.parsed_data:
-                    logger.error(f"No parsed data found for file: {file_id}")
-                    raise ValueError("No parsed data found")
-
-                # Extract transactions from parsed data - handle different possible structures
-                parsed_content = file.parsed_data
-                if isinstance(parsed_content, dict):
-                    # Navigate through possible nested structures
-                    for key in ['parsed_result', 'content', 'parsed_content']:
-                        if key in parsed_content:
-                            parsed_content = parsed_content[key]
+                    raise ValueError(f"No parsed data found for file {file_id}")
                 
-                transactions = parsed_content.get('transactions', [])
+                # Extract transactions from parsed data
+                transactions = file.parsed_data.get("transactions", [])
                 if not transactions:
-                    logger.error(f"No transactions found in parsed content structure: {parsed_content}")
                     raise ValueError("No transactions found in parsed content")
-
-                # Group transactions by settlement date
-                settlement_groups = {}
-                for trans in transactions:
-                    settle_date = trans.get('SettlementDate')
-                    if settle_date:
-                        if settle_date not in settlement_groups:
-                            settlement_groups[settle_date] = []
-                        settlement_groups[settle_date].append(trans)
-
-                matching_unit_ids = []
                 
-                # Create matching units for each settlement date
-                for settle_date, grouped_trans in settlement_groups.items():
-                    pay_leg = next((t for t in grouped_trans if t.get('BuyrOrSell') == 'Sell'), None)
-                    receive_leg = next((t for t in grouped_trans if t.get('BuyrOrSell') == 'Buy'), None)
-                    
-                    if pay_leg and receive_leg:
-                        matching_unit = MatchingUnit(
-                            file_id=file_id,
-                            extracted_transactions={
-                                'pay_leg': pay_leg,
-                                'receive_leg': receive_leg,
-                                'trade_type': parsed_content.get('TradeType'),
-                                'trade_date': parsed_content.get('TradeDate'),
-                                'settlement_date': settle_date,
-                                'trading_party_code': parsed_content.get('TradingParty'),
-                                'counterparty_code': parsed_content.get('CounterParty'),
-                                'trade_ref': parsed_content.get('TradeRef'),
-                                'trade_uti': parsed_content.get('TradeUTI')
-                            }
-                        )
-                        db.add(matching_unit)
-                        await db.flush()  # Flush to get the generated ID
-                        matching_unit_ids.append(matching_unit.matching_unit_id)
-
+                # Create matching units
+                matching_unit_ids = []
+                for transaction in transactions:
+                    matching_unit = MatchingUnit(
+                        file_id=file_id,
+                        extracted_transactions=transaction
+                    )
+                    db.add(matching_unit)
+                    await db.flush()  # Get the ID
+                    matching_unit_ids.append(matching_unit.matching_unit_id)
+                
                 # Create status history record
                 status_history = FileStatusHistory(
                     file_id=file_id,

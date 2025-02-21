@@ -85,56 +85,28 @@ class ExtractTextResponse(BaseModel):
 
 @router.post("/extract-text")
 async def extract_text(request: PDFReadRequest):
-    """
-    Extract text content from a PDF file.
-    
-    This endpoint:
-    - Validates the file exists and is in correct status (Not_Processed)
-    - Extracts text content from the PDF
-    - Updates the file status to TEXT_EXTRACTED
-    - Records the status change in history
-    """
+    """Extract text content from a PDF file."""
     logger.info(f"Starting extract-text for file_id: {request.file_id}")
     
     async with get_db() as db:
         try:
-            logger.debug("Acquiring row lock...")
-            query = select(ConfirmationFile).where(
-                ConfirmationFile.file_id == request.file_id,
-                (ConfirmationFile.processing_status.is_(None)) | 
-                (ConfirmationFile.processing_status == ProcessingStatus.Not_Processed)
-            ).with_for_update()
-            
-            result = await db.execute(query)
-            file_data = result.scalar_one_or_none()
-            
-            if not file_data:
-                logger.warning(f"File not found or invalid status: {request.file_id}")
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"File with ID {request.file_id} not found or already processed"
-                )
+            # Get file with status validation
+            file_data = await file_service.get_file_with_status(
+                file_id=request.file_id,
+                expected_status=[None, ProcessingStatus.Not_Processed]
+            )
             
             if request.location == LocationType.LOCAL:
-                if not file_data.file_path:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="File path not found in database"
-                    )
-                
-                logger.debug("Calling PDFProcessor.extract_text_from_pdf...")
-                result = await PDFProcessor.extract_text_from_pdf(
+                # Extract text
+                result = await pdf_service.extract_text_from_pdf(
                     file_id=request.file_id,
                     file_path=file_data.file_path,
                     file_name=file_data.file_name
                 )
                 
                 if result["data"]["success"]:
-                    # Update the file's extracted text
-                    file_data.extracted_text = result["data"]["text_content"]
-                    
-                    # Create status history record
-                    status_history = FileStatusHistory(
+                    # Create status history
+                    await status_service.create_status_history(
                         file_id=file_data.file_id,
                         previous_status=file_data.processing_status,
                         new_status=ProcessingStatus.TEXT_EXTRACTED,
@@ -147,24 +119,21 @@ async def extract_text(request: PDFReadRequest):
                             "extraction_metadata": result["data"].get("metadata", {})
                         }
                     )
-                    db.add(status_history)
                     
                     # Update file status
+                    file_data.extracted_text = result["data"]["text_content"]
                     file_data.processing_status = ProcessingStatus.TEXT_EXTRACTED
+                    await db.commit()
                     
                     return result
-                else:
-                    raise HTTPException(
-                        status_code=500,
-                        detail=result["data"].get("error", "Unknown error during extraction")
-                    )
-            else:
-                raise HTTPException(
-                    status_code=501,
-                    detail="Cloud storage integration not implemented yet"
-                )
+                    
+            raise HTTPException(
+                status_code=501,
+                detail="Cloud storage integration not implemented yet"
+            )
                 
         except Exception as e:
+            await db.rollback()
             logger.error(f"Error in extract_text: {str(e)}", exc_info=True)
             raise HTTPException(
                 status_code=500,

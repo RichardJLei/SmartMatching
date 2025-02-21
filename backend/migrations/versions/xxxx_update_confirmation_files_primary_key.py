@@ -1,0 +1,1 @@
+# Remove any create_table or alter_table operations related to parsing_results 
