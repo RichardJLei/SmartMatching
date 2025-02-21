@@ -140,7 +140,10 @@ async def extract_text(request: PDFReadRequest):
                         new_status=ProcessingStatus.TEXT_EXTRACTED,
                         trigger_source="api/extract-text",
                         additional_data={
-                            "request_params": request.dict(),
+                            "request_params": {
+                                "file_id": str(request.file_id),
+                                "location": request.location.value
+                            },
                             "extraction_metadata": result["data"].get("metadata", {})
                         }
                     )
