@@ -21,11 +21,8 @@ Contains all the router definitions for the API endpoints. Each endpoint related
 /backend
     /api
         /routers
-            /users               # User-related endpoints
-                add_user.py
-                get_user.py
-                update_user.py
-                delete_user.py
+            /confirmation_files         # endpoints related to confirmation_files table
+                extract_text.py         # extract text from confirmation pdf files  
             /transactions        # Transaction-related endpoints
                 add_transaction.py
                 get_transaction.py
@@ -41,11 +38,8 @@ Handles the core business logic, separated from API routing. Each major function
 ```plaintext
 /backend
     /services
-        /user
-            add_user_service.py
-            get_user_service.py
-            update_user_service.py
-            delete_user_service.py
+        /confirmation_files
+            extract_text_service.py # extract text from confirmation pdf files
         /transaction
             add_transaction_service.py
             get_transaction_service.py

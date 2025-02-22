@@ -7,6 +7,7 @@ from database.database import get_db
 from uuid import UUID
 from sqlalchemy import select
 import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -18,21 +19,33 @@ class PDFProcessor:
         """Extract text content from a PDF file and update database."""
         logger.info(f"Starting PDF text extraction for file: {file_name}")
         try:
-            # Construct full file path
-            full_file_path = os.path.join(file_path, file_name)
+            # Get backend root directory
+            backend_root = Path(__file__).parent.parent
+            
+            # Remove trailing slash from file_path if present
+            clean_file_path = file_path.rstrip('/')
+            
+            # Construct full file path relative to backend root
+            full_file_path = backend_root / clean_file_path / file_name
             logger.debug(f"Full file path: {full_file_path}")
             
-            if not os.path.exists(full_file_path):
+            if not full_file_path.exists():
                 logger.error(f"File not found at path: {full_file_path}")
-                raise HTTPException(status_code=404, detail="File not found")
+                raise HTTPException(
+                    status_code=404, 
+                    detail=f"File not found at path: {full_file_path}"
+                )
             
-            if not full_file_path.lower().endswith('.pdf'):
+            if not str(full_file_path).lower().endswith('.pdf'):
                 logger.error(f"Invalid file type for: {full_file_path}")
-                raise HTTPException(status_code=400, detail="File must be a PDF")
+                raise HTTPException(
+                    status_code=400,
+                    detail="File must be a PDF"
+                )
             
             # Extract text from PDF
             logger.debug("Starting PDF text extraction...")
-            reader = PdfReader(full_file_path)
+            reader = PdfReader(str(full_file_path))
             text_content = ""
             for page_num, page in enumerate(reader.pages, 1):
                 logger.debug(f"Processing page {page_num}/{len(reader.pages)}")
@@ -53,6 +66,8 @@ class PDFProcessor:
                     }
                 }
             }
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"Error extracting text from PDF: {str(e)}", exc_info=True)
             return {

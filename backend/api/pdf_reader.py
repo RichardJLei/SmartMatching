@@ -23,36 +23,12 @@ router = APIRouter(
     responses={404: {"description": "Not found"}}
 )
 
-class LocationType(str, Enum):
-    """Enum for file location types"""
-    LOCAL = "local"
-    CLOUD = "cloud"
-
 class ModelType(str, Enum):
     """Enum for supported parsing models"""
     DEEPSEEK_CHAT = "deepseek_chat"
     NVIDIA_DEEPSEEK_R1 = "nvidia_deepseek_r1"
     GEMINI = "gemini-2.0-flash"
     # Add more models as needed
-
-class PDFReadRequest(BaseModel):
-    """Request model for PDF reading endpoints"""
-    file_id: UUID4 = Field(
-        ...,
-        description="Unique identifier of the file to process"
-    )
-    location: LocationType = Field(
-        default=LocationType.LOCAL,
-        description="Storage location of the file (local or cloud)"
-    )
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "file_id": "123e4567-e89b-12d3-a456-426614174000",
-                "location": "local"
-            }
-        }
 
 class ParseTextRequest(BaseModel):
     """
@@ -82,63 +58,6 @@ class ExtractTextResponse(BaseModel):
             }
         }
     )
-
-@router.post("/extract-text")
-async def extract_text(request: PDFReadRequest):
-    """Extract text content from a PDF file."""
-    logger.info(f"Starting extract-text for file_id: {request.file_id}")
-    
-    async with get_db() as db:
-        try:
-            # Get file with status validation
-            file_data = await file_service.get_file_with_status(
-                file_id=request.file_id,
-                expected_status=[None, ProcessingStatus.Not_Processed]
-            )
-            
-            if request.location == LocationType.LOCAL:
-                # Extract text
-                result = await pdf_service.extract_text_from_pdf(
-                    file_id=request.file_id,
-                    file_path=file_data.file_path,
-                    file_name=file_data.file_name
-                )
-                
-                if result["data"]["success"]:
-                    # Create status history
-                    await status_service.create_status_history(
-                        file_id=file_data.file_id,
-                        previous_status=file_data.processing_status,
-                        new_status=ProcessingStatus.TEXT_EXTRACTED,
-                        trigger_source="api/extract-text",
-                        additional_data={
-                            "request_params": {
-                                "file_id": str(request.file_id),
-                                "location": request.location.value
-                            },
-                            "extraction_metadata": result["data"].get("metadata", {})
-                        }
-                    )
-                    
-                    # Update file status
-                    file_data.extracted_text = result["data"]["text_content"]
-                    file_data.processing_status = ProcessingStatus.TEXT_EXTRACTED
-                    await db.commit()
-                    
-                    return result
-                    
-            raise HTTPException(
-                status_code=501,
-                detail="Cloud storage integration not implemented yet"
-            )
-                
-        except Exception as e:
-            await db.rollback()
-            logger.error(f"Error in extract_text: {str(e)}", exc_info=True)
-            raise HTTPException(
-                status_code=500,
-                detail=f"Error processing file: {str(e)}"
-            )
 
 @router.post("/parse-text")
 async def parse_text(request: ParseTextRequest):
