@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 from api.routes import pdf
 from api import pdf_reader
-from api.routes.confirmation_files import extract_text
+from api.routes.confirmation_files import extract_text, parse_text
 
 class SensitiveDataFilter(logging.Filter):
     """Filter out sensitive and verbose data from logs"""
@@ -51,6 +51,12 @@ app.include_router(pdf.router, prefix="/api", tags=["pdf"])
 logger.debug("Registering extract_text router...")
 app.include_router(
     extract_text.router,
+    prefix="/api",
+    tags=["confirmation_files"]
+)
+logger.debug("Registering parse_text router...")
+app.include_router(
+    parse_text.router,
     prefix="/api",
     tags=["confirmation_files"]
 )
