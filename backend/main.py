@@ -4,6 +4,7 @@ import logging
 from api.routes import pdf
 from api import pdf_reader
 from api.routes.confirmation_files import extract_text, parse_text
+from api.routes.matching_units import extract_matching_units
 
 class SensitiveDataFilter(logging.Filter):
     """Filter out sensitive and verbose data from logs"""
@@ -59,6 +60,12 @@ app.include_router(
     parse_text.router,
     prefix="/api",
     tags=["confirmation_files"]
+)
+logger.debug("Registering extract_matching_units router...")
+app.include_router(
+    extract_matching_units.router,
+    prefix="/api",
+    tags=["matching_units"]
 )
 
 @app.on_event("startup")
